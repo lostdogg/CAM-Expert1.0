@@ -3,6 +3,7 @@
 #include "ui/RibbonUI.h"
 #include "ui/Viewport3D.h"
 #include "ui/SelectionBar.h"
+#include "ui/CopilotPanel.h"
 #include "managers/ToolpathManager.h"
 #include "managers/SolidsManager.h"
 #include "managers/LevelsManager.h"
@@ -11,6 +12,7 @@
 #include "simulation/Verify.h"
 #include "simulation/MachineSimulation.h"
 #include "cam/PostProcessor.h"
+#include "copilot/CopilotEngine.h"
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shlobj.h>
@@ -181,6 +183,14 @@ void MainWindow::onCreate() {
                     reinterpret_cast<LPARAM>(names[idx]));
         });
     }
+
+    // --- Copilot ---
+    m_copilotEngine = std::make_unique<CopilotEngine>();
+    m_copilotEngine->setToolpathManager(m_toolpathMgr.get());
+
+    m_copilotPanel = std::make_unique<CopilotPanel>(m_hwnd, hInst);
+    m_copilotPanel->setCopilotEngine(m_copilotEngine.get());
+    ShowWindow(m_copilotPanel->hwnd(), SW_HIDE);  // hidden by default
 }
 
 // --------------------------------------------------------------------------
@@ -219,7 +229,9 @@ void MainWindow::buildMenu() {
     AppendMenuW(hView, MF_STRING, IDM_VIEW_RIGHT,     L"&Right");
 
     // Help menu
-    AppendMenuW(hHelp, MF_STRING, IDM_HELP_ABOUT, L"&About CAM-Expert…");
+    AppendMenuW(hHelp, MF_STRING, IDM_HELP_ABOUT,      L"&About CAM-Expert…");
+    AppendMenuW(hHelp, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hHelp, MF_STRING, IDM_COPILOT_TOGGLE,  L"Toggle &Copilot Panel\tF1");
 
     AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hFile),    L"&File");
     AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hMachine), L"&Machine");
@@ -245,10 +257,13 @@ void MainWindow::updateLayout(int cx, int cy) {
     int viewY  = RIBBON_HEIGHT;
     int viewH  = cy - RIBBON_HEIGHT - STATUS_BAR_HEIGHT;
 
-    // Selection bar sits on the right edge of the window
-    int selBarX = cx - SELECTION_BAR_WIDTH;
+    // If the Copilot panel is visible, carve out space on the right side
+    int copilotW = (m_copilotVisible && m_copilotPanel) ? COPILOT_PANEL_WIDTH : 0;
+
+    // Selection bar sits on the right edge, to the left of the Copilot panel
+    int selBarX = cx - SELECTION_BAR_WIDTH - copilotW;
     int viewX   = MANAGERS_PANEL_WIDTH;
-    int viewW   = cx - MANAGERS_PANEL_WIDTH - SELECTION_BAR_WIDTH;
+    int viewW   = cx - MANAGERS_PANEL_WIDTH - SELECTION_BAR_WIDTH - copilotW;
 
     // Managers panel
     if (m_hManagersPanel)
@@ -264,9 +279,13 @@ void MainWindow::updateLayout(int cx, int cy) {
     if (m_viewport)
         m_viewport->resize(viewX, viewY, viewW, viewH);
 
-    // Selection bar (right edge of the window)
+    // Selection bar (right edge of the viewport area)
     if (m_selectionBar)
         m_selectionBar->resize(selBarX, viewY, SELECTION_BAR_WIDTH, viewH);
+
+    // Copilot panel (far right, full height below ribbon)
+    if (m_copilotPanel && m_copilotVisible)
+        m_copilotPanel->resize(cx - copilotW, viewY, copilotW, viewH);
 }
 
 // --------------------------------------------------------------------------
@@ -353,6 +372,19 @@ void MainWindow::onCommand(int id) {
 
     case IDM_HELP_ABOUT:
         showAboutDialog();
+        break;
+
+    case IDM_COPILOT_TOGGLE:
+        toggleCopilotPanel();
+        break;
+
+    default:
+        // Forward only Copilot-panel command IDs to avoid interfering
+        // with future additions to other command ranges.
+        if (m_copilotPanel && m_copilotVisible &&
+            id >= IDC_COPILOT_OUTPUT && id <= IDC_COPILOT_CLEAR) {
+            m_copilotPanel->handleCommand(id);
+        }
         break;
     }
 }
@@ -526,4 +558,23 @@ void MainWindow::runMachineSim() {
     }
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
         reinterpret_cast<LPARAM>(msg.c_str()));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::toggleCopilotPanel() {
+    if (!m_copilotPanel) return;
+
+    m_copilotVisible = !m_copilotVisible;
+    ShowWindow(m_copilotPanel->hwnd(),
+               m_copilotVisible ? SW_SHOW : SW_HIDE);
+
+    // Re-run layout so the viewport resizes to accommodate the panel
+    RECT rc{};
+    GetClientRect(m_hwnd, &rc);
+    updateLayout(rc.right, rc.bottom);
+
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(
+            m_copilotVisible ? L"CAM Copilot panel opened."
+                             : L"CAM Copilot panel closed."));
 }

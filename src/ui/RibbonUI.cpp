@@ -41,6 +41,7 @@ void RibbonUI::build() {
     buildModelPrepTab();
     buildMachineTab();
     buildViewTab();
+    buildCopilotTab();
 }
 
 // --------------------------------------------------------------------------
@@ -178,6 +179,17 @@ void RibbonUI::buildViewTab() {
     tab.groups.push_back(mode);
     tab.groups.push_back(view);
     tab.groups.push_back(fit);
+    addTab(tab);
+}
+
+// --------------------------------------------------------------------------
+void RibbonUI::buildCopilotTab() {
+    RibbonTab tab;
+    tab.name = "Copilot";
+    RibbonGroup panel{"Panel", {
+        {IDM_COPILOT_TOGGLE, "Toggle Copilot", "Show or hide the AI Copilot panel (F1)"}
+    }};
+    tab.groups.push_back(panel);
     addTab(tab);
 }
 

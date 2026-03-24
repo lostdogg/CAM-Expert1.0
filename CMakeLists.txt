@@ -47,6 +47,12 @@ set(SOURCES
     src/simulation/Backplot.cpp
     src/simulation/Verify.cpp
     src/simulation/MachineSimulation.cpp
+    src/copilot/IntentParser.cpp
+    src/copilot/ContextBuffer.cpp
+    src/copilot/ParameterNegotiator.cpp
+    src/copilot/AuditLog.cpp
+    src/copilot/CopilotEngine.cpp
+    src/ui/CopilotPanel.cpp
 )
 
 # Header files (for IDE visibility)
@@ -85,6 +91,12 @@ set(HEADERS
     src/simulation/Backplot.h
     src/simulation/Verify.h
     src/simulation/MachineSimulation.h
+    src/copilot/IntentParser.h
+    src/copilot/ContextBuffer.h
+    src/copilot/ParameterNegotiator.h
+    src/copilot/AuditLog.h
+    src/copilot/CopilotEngine.h
+    src/ui/CopilotPanel.h
     src/resources/resource.h
 )
 
