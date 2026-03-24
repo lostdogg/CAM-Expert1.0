@@ -24,7 +24,8 @@ public:
         double stockAllowance   = 0.0;    // finish stock on walls
         int    passes           = 1;      // number of axial passes
         bool   climb            = true;   // climb (true) or conventional (false)
-        double leadInRadius     = 2.0;    // tangential lead-in arc radius
+        double leadInRadius     = 2.0;    // tangential lead-in arc radius (mm)
+        double leadOutRadius    = 2.0;    // tangential lead-out arc radius (mm)
     };
 
     struct Pocket2DParams {
@@ -69,10 +70,10 @@ public:
                               const CuttingParams& cuts);
 
 private:
-    // Generate a single planar pass at a given Z
+    // Generate a single planar pass at a given Z, with optional lead-in/lead-out arcs
     static void addContourPass(Toolpath& tp,
                                 const std::vector<Geom::Vec2>& profile,
-                                double z, double leadInR);
+                                double z, double leadInR, double leadOutR = 0.0);
 
     // Generate concentric offset loops inward from a boundary
     static std::vector<std::vector<Geom::Vec2>>

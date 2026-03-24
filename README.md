@@ -29,11 +29,13 @@
 ### CAM Toolpath Strategies
 | Category | Strategies |
 |---|---|
-| **2D / 2.5D Milling** | Contour, Pocket (concentric offsets), Face Mill, Drilling (G81/G83 peck), Thread Mill |
+| **2D / 2.5D Milling** | Contour (lead-in + lead-out arcs), Pocket (concentric offsets), Face Mill, Drilling (G81/G83 peck), Thread Mill |
 | **Dynamic Motion** | Trochoidal milling, constant chip-load, micro-lifts, helical arc entry |
-| **3D Milling** | Waterline (Z-level), Raster, Scallop, Spiral – all with surface projection |
-| **Multi-Axis** | 5-axis swarf, 5-axis normal-to-surface, 4-axis rotary wrap, lead/lag tilt |
+| **3D Milling** | Waterline (Z-level), Raster, Scallop (h = R − √(R²−(Sₒ/2)²)), Spiral – all with surface projection |
+| **Multi-Axis** | 5-axis swarf, 5-axis normal-to-surface, 4-axis rotary wrap, lead/lag tilt, tool-holder collision avoidance |
 | **Turning & Mill-Turn** | Rough turn, finish turn (profile following), groove (peck), thread (G76), sub-spindle transfer |
+| **Swiss-Style Machining** | Sliding headstock (Z-inverted coords), Pinch/Sync two-tool whip prevention |
+| **Cloud Tool Library** | Digital twin import, manufacturer feeds/speeds, dynamic arc limit calculation |
 
 ### Verification & Simulation
 - **Backplot** – wireframe animation of tool motion (rapid/feed/plunge/retract colour-coded)
@@ -109,10 +111,14 @@ CAM-Expert1.0/
 │   ├── cam/
 │   │   ├── Toolpath.h/.cpp       # Tool, CuttingParams, ToolpathPoint
 │   │   ├── DynamicMotion.h/.cpp  # Trochoidal / high-efficiency strategies
-│   │   ├── Strategies2D.h/.cpp   # 2D/2.5D milling operations
-│   │   ├── Strategies3D.h/.cpp   # 3D surface milling operations
-│   │   ├── MultiAxis.h/.cpp      # 4/5-axis strategies + IK
+│   │   ├── Strategies2D.h/.cpp   # 2D/2.5D milling (contour w/ lead-in/out, pocket, drill)
+│   │   ├── Strategies3D.h/.cpp   # 3D surface milling (waterline, scallop w/ h formula)
+│   │   ├── MultiAxis.h/.cpp      # 4/5-axis strategies + IK + holder collision avoidance
 │   │   ├── Turning.h/.cpp        # Turning & mill-turn operations
+│   │   ├── SwissMachining.h/.cpp # Swiss sliding-headstock + pinch/sync toolpaths
+│   │   ├── CloudToolLibrary.h/.cpp # Digital twin + manufacturer feed/speed data
+│   │   ├── MaterialLibrary.h/.cpp # Material properties + feed/speed calculator
+│   │   ├── MillTurn.h/.cpp       # Multi-turret synchronisation (pinch, balanced, cutoff)
 │   │   ├── NciFormat.h/.cpp      # NCI intermediate format
 │   │   └── PostProcessor.h/.cpp  # G-code post-processor
 │   ├── managers/

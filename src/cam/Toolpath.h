@@ -88,6 +88,8 @@ enum class StrategyType {
     Swarf4Axis, Multiaxis5, PortMachining,
     // Turning
     RoughTurning, FinishTurning, Grooving, ThreadTurning,
+    // Swiss-Style (sliding headstock)
+    SwissSliding, SwissPinchSync,
     // Misc
     Custom
 };

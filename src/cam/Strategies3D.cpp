@@ -2,12 +2,32 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <sstream>
 
 static constexpr double PI3D = 3.14159265358979323846;
 
 // --------------------------------------------------------------------------
-// Möller–Trumbore ray-triangle intersection
+// Scallop height: h = R - √(R² - (Sₒ/2)²)
+//
+// Predicts the height of the residual cusp left between adjacent tool passes.
+// Used by the scallop strategy to verify surface finish before cutting.
 // --------------------------------------------------------------------------
+double Strategies3D::scallopHeight(double toolRadius, double stepOver) {
+    double half = stepOver * 0.5;
+    if (half >= toolRadius) return toolRadius; // degenerate: full step
+    return toolRadius - std::sqrt(toolRadius * toolRadius - half * half);
+}
+
+// --------------------------------------------------------------------------
+// Inverse: compute the stepover that achieves a target scallop height.
+//   Sₒ = 2·√( R² - (R - h)² )
+// --------------------------------------------------------------------------
+double Strategies3D::stepOverFromScallop(double toolRadius, double targetScallopHeight) {
+    double h = std::max(0.0, std::min(targetScallopHeight, toolRadius));
+    return 2.0 * std::sqrt(toolRadius * toolRadius - (toolRadius - h) * (toolRadius - h));
+}
+
+
 bool Strategies3D::rayTriIntersect(const Geom::Ray& ray,
                                     const Geom::Triangle& tri,
                                     double& t) {
@@ -208,11 +228,20 @@ Toolpath Strategies3D::raster(const MeshData& mesh,
 
 // --------------------------------------------------------------------------
 // Scallop – constant step-over along surface (simplified: waterline variant)
+//
+// The stepover (Sₒ) stored in ScallopParams is the lateral distance between
+// passes.  The resulting cusp height is calculated via:
+//   h = R - √(R² - (Sₒ/2)²)
+// This value is recorded in the toolpath name so the operator can verify the
+// predicted finish before the first chip is cut.
 // --------------------------------------------------------------------------
 Toolpath Strategies3D::scallop(const NurbsSurface& surf,
                                  const ScallopParams& p,
                                  const CuttingTool& tool,
                                  const CuttingParams& cuts) {
+    double toolRadius = tool.diameter * 0.5;
+    double h = scallopHeight(toolRadius, p.stepOver);
+
     WaterlineParams wp;
     wp.topZ           = surf.evaluate(surf.uMin() + (surf.uMax()-surf.uMin())*0.5,
                                       surf.vMin()).z + 2.0;
@@ -221,7 +250,13 @@ Toolpath Strategies3D::scallop(const NurbsSurface& surf,
     wp.stockAllowance = p.stockAllowance;
 
     Toolpath tp = waterline(surf, wp, tool, cuts);
-    tp.setName("Scallop 3D");
+
+    // Embed predicted scallop height in the operation name
+    std::ostringstream nameStream;
+    nameStream << std::fixed;
+    nameStream.precision(3);
+    nameStream << "Scallop 3D (So=" << p.stepOver << "mm, h=" << h << "mm)";
+    tp.setName(nameStream.str());
     return tp;
 }
 
