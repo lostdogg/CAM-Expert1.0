@@ -126,8 +126,22 @@ std::string ParameterNegotiator::buildRationale(const NegotiatedParams& p,
        << std::fixed << std::setprecision(1) << mat.machinabilityIndex << ")\n";
 
     // Tool
+    auto toolTypeStr = [](ToolType t) -> const char* {
+        switch (t) {
+            case ToolType::EndMill:       return "endmill";
+            case ToolType::BallEndMill:   return "ball endmill";
+            case ToolType::BullNoseMill:  return "bull-nose endmill";
+            case ToolType::DrillBit:      return "drill bit";
+            case ToolType::ReamBit:       return "ream bit";
+            case ToolType::BoringBar:     return "boring bar";
+            case ToolType::FaceMill:      return "face mill";
+            case ToolType::TurningInsert: return "turning insert";
+            case ToolType::ThreadingTool: return "threading tool";
+            default:                      return "tool";
+        }
+    };
     ss << "Tool: Ø" << std::fixed << std::setprecision(1) << p.tool.diameter
-       << " mm " << p.tool.numFlutes << "-flute endmill"
+       << " mm " << p.tool.numFlutes << "-flute " << toolTypeStr(p.tool.type)
        << "  [" << p.tool.material << "]\n";
 
     // Feeds & speeds

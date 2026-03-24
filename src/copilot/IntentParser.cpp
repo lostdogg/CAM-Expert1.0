@@ -77,9 +77,11 @@ CopilotTarget IntentParser::classifyTarget(const std::string& text) const {
         contains(text, "that face"))
         return CopilotTarget::SelectedFace;
 
-    if (contains(text, "pocket") || contains(text, "cavity") ||
-        contains(text, "slot"))
-        return (contains(text, "slot")) ? CopilotTarget::Slot : CopilotTarget::Pocket;
+    if (contains(text, "slot"))
+        return CopilotTarget::Slot;
+
+    if (contains(text, "pocket") || contains(text, "cavity"))
+        return CopilotTarget::Pocket;
 
     if (contains(text, "wall") || contains(text, "side") ||
         contains(text, "vertical"))

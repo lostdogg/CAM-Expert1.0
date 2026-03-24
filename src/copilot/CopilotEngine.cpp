@@ -114,8 +114,8 @@ CopilotResponse CopilotEngine::processCommand(const std::string& command) {
         e.strategy = "N/A";
         e.material = "N/A";
         e.outcome  = AuditOutcome::Error;
-        e.errorDetail = "Low confidence parse (" +
-                         std::to_string(static_cast<int>(intent.confidence * 100)) + "%)";
+        e.errorDetail = "Low confidence parse: " +
+                         std::to_string(static_cast<int>(intent.confidence * 100)) + "%";
         m_auditLog->record(e);
         return resp;
     }
@@ -197,6 +197,10 @@ CopilotResponse CopilotEngine::processCommand(const std::string& command) {
 
 // --------------------------------------------------------------------------
 // applyLastSuggestion – generate toolpath and insert into manager
+// Placeholder boundary size (mm) used when no selection geometry is available.
+// In a full integration, this would be replaced by the selected face's boundary.
+static constexpr double SENTINEL_BOUNDARY_MM = 50.0;
+
 // --------------------------------------------------------------------------
 bool CopilotEngine::applyLastSuggestion() {
     if (!m_pendingSuggestion || !m_toolpathMgr) return false;
@@ -205,10 +209,11 @@ bool CopilotEngine::applyLastSuggestion() {
 
     // Use DynamicMotion to generate a placeholder toolpath with the negotiated
     // params.  For a full implementation, the boundary would come from the
-    // selected geometry; here we use a unit-square sentinel boundary so the
+    // selected geometry; here we use a square sentinel boundary so the
     // engine produces a valid Toolpath object.
     std::vector<Geom::Vec2> boundary = {
-        {0, 0}, {50, 0}, {50, 50}, {0, 50}
+        {0, 0}, {SENTINEL_BOUNDARY_MM, 0},
+        {SENTINEL_BOUNDARY_MM, SENTINEL_BOUNDARY_MM}, {0, SENTINEL_BOUNDARY_MM}
     };
     double depth = (p.cuttingParams.axialDepth > 0) ? p.cuttingParams.axialDepth : 5.0;
 

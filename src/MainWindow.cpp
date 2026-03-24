@@ -379,9 +379,12 @@ void MainWindow::onCommand(int id) {
         break;
 
     default:
-        // Forward to Copilot panel if it is visible and active
-        if (m_copilotPanel)
+        // Forward only Copilot-panel command IDs to avoid interfering
+        // with future additions to other command ranges.
+        if (m_copilotPanel && m_copilotVisible &&
+            id >= IDC_COPILOT_OUTPUT && id <= IDC_COPILOT_CLEAR) {
             m_copilotPanel->handleCommand(id);
+        }
         break;
     }
 }

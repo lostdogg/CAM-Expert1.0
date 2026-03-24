@@ -9,6 +9,7 @@
 // --------------------------------------------------------------------------
 CopilotPanel::CopilotPanel(HWND parent, HINSTANCE hInstance)
     : m_hInst(hInstance)
+    , m_hBgBrush(CreateSolidBrush(RGB(248, 248, 252)))
 {
     // Register the panel window class (once per process)
     WNDCLASSEXW wc{};
@@ -40,7 +41,8 @@ CopilotPanel::CopilotPanel(HWND parent, HINSTANCE hInstance)
 }
 
 CopilotPanel::~CopilotPanel() {
-    if (m_hwnd) DestroyWindow(m_hwnd);
+    if (m_hwnd)    DestroyWindow(m_hwnd);
+    if (m_hBgBrush) DeleteObject(m_hBgBrush);
 }
 
 // --------------------------------------------------------------------------
@@ -172,9 +174,11 @@ void CopilotPanel::appendOutput(const std::string& text, bool /*isError*/) {
     if (!m_hOutput) return;
 
     // Convert to wide string for Win32 EDIT control
+    // MultiByteToWideChar returns the required size including null terminator;
+    // initialise wstring with (wlen-1) chars so the buffer is exact.
     int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-    if (wlen <= 0) return;
-    std::wstring wide(static_cast<std::size_t>(wlen), L'\0');
+    if (wlen <= 1) return;   // nothing or only a null terminator
+    std::wstring wide(static_cast<std::size_t>(wlen - 1), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wide.data(), wlen);
 
     // Win32 EDIT uses \r\n for newlines; replace bare \n
@@ -309,11 +313,10 @@ LRESULT CopilotPanel::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORSTATIC: {
-        // Give the panel a slightly off-white background
+        // Give the panel a slightly off-white background (brush is owned by this object)
         HDC hdc = reinterpret_cast<HDC>(wParam);
         SetBkColor(hdc, RGB(248, 248, 252));
-        static HBRUSH hBrush = CreateSolidBrush(RGB(248, 248, 252));
-        return reinterpret_cast<LRESULT>(hBrush);
+        return reinterpret_cast<LRESULT>(m_hBgBrush);
     }
 
     default:

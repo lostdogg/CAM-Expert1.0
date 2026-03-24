@@ -87,6 +87,7 @@ private:
     HWND           m_hVerify   = nullptr;
     HWND           m_hClear    = nullptr;
     HINSTANCE      m_hInst     = nullptr;
+    HBRUSH         m_hBgBrush  = nullptr;   // background brush (owned)
 
     CopilotEngine* m_engine    = nullptr;   // not owned
     bool           m_hasPendingSuggestion = false;
