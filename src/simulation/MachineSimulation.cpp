@@ -3,6 +3,9 @@
 #include <cmath>
 #include <algorithm>
 
+// M_PI is not guaranteed by the C++ standard; define our own constant.
+static constexpr double kPI = 3.14159265358979323846;
+
 // --------------------------------------------------------------------------
 // Pre-built machine configurations
 // --------------------------------------------------------------------------
@@ -148,6 +151,213 @@ bool MachineSimulation::checkCollision(const ToolpathPoint& pt,
         return true;
 
     return false;
+}
+
+// --------------------------------------------------------------------------
+// holderClearance – compute the minimum distance (mm) between the tool holder
+// envelope and the nearest obstacle.  Returns a large sentinel when clear.
+// --------------------------------------------------------------------------
+double MachineSimulation::holderClearance(const ToolpathPoint& pt,
+                                           const CuttingTool& tool) const {
+    double shankRadius = tool.diameter * kShankDiameterMultiplier;
+    double fluteLen    = tool.fluteLength;
+    double overallLen  = tool.overallLength;
+
+    const Geom::Vec3& tip = pt.position;
+
+    Geom::Vec3 axis = pt.toolAxis;
+    if (axis.length() < 0.5) axis = {0, 0, 1};
+    axis = axis.normalized();
+
+    Geom::Vec3 holderBase = tip + axis * fluteLen;
+    Geom::Vec3 holderTop  = tip + axis * overallLen;
+
+    Geom::AABB holder;
+    holder.expand(holderBase);
+    holder.expand(holderTop);
+    holder.min.x -= shankRadius; holder.max.x += shankRadius;
+    holder.min.y -= shankRadius; holder.max.y += shankRadius;
+
+    // Distance from holder AABB to the fixture block
+    Geom::AABB fixture;
+    fixture.min = {-kFixtureHalfExtentXY, -kFixtureHalfExtentXY, -kFixtureDepth};
+    fixture.max = { kFixtureHalfExtentXY,  kFixtureHalfExtentXY,   0};
+
+    // Gap in each axis (negative when overlapping)
+    double gapX = std::max(fixture.min.x - holder.max.x,
+                            holder.min.x - fixture.max.x);
+    double gapY = std::max(fixture.min.y - holder.max.y,
+                            holder.min.y - fixture.max.y);
+    double gapZ = std::max(fixture.min.z - holder.max.z,
+                            holder.min.z - fixture.max.z);
+
+    // Minimum clearance is the distance between the closest faces
+    if (gapX > 0 || gapY > 0 || gapZ > 0) {
+        // AABBs don't overlap – distance is the gap along the separating axis
+        double d2 = (gapX > 0 ? gapX*gapX : 0.0)
+                  + (gapY > 0 ? gapY*gapY : 0.0)
+                  + (gapZ > 0 ? gapZ*gapZ : 0.0);
+        return std::sqrt(d2);
+    }
+    // Overlapping: clearance is negative (penetration depth)
+    return std::min({gapX, gapY, gapZ});
+}
+
+// --------------------------------------------------------------------------
+// computeTiltAvoidance – 5-axis automatic tilt away from holder collision.
+//
+// Algorithm:
+//  1. Compute holder clearance distance D.
+//  2. If D >= params.clearanceDistance → no tilt needed.
+//  3. Otherwise, build an avoidance direction perpendicular to the tool axis
+//     in the plane of the closest obstacle face.
+//  4. Rotate the tool axis by (clearanceDistance − D) × scale, clamped to
+//     params.maxTiltAngleDeg.
+//  5. Verify the new axis satisfies IK limits; if not, try the opposite side.
+// --------------------------------------------------------------------------
+TiltAvoidanceResult MachineSimulation::computeTiltAvoidance(
+        const ToolpathPoint& pt,
+        const CuttingTool&   tool,
+        const CollisionControlParams& params) const {
+
+    TiltAvoidanceResult result;
+    result.originalAxis = pt.toolAxis;
+    result.adjustedAxis = pt.toolAxis;
+
+    double clearance = holderClearance(pt, tool);
+    if (clearance >= params.clearanceDistance)
+        return result;  // no tilt needed
+
+    // Compute how much tilt we need (proportional to penetration)
+    double deficit    = params.clearanceDistance - clearance;
+    double tiltDeg    = std::min(deficit * 10.0, params.maxTiltAngleDeg);
+    double tiltRad    = tiltDeg * kPI / 180.0;
+
+    Geom::Vec3 axis = pt.toolAxis;
+    if (axis.length() < 0.5) axis = {0, 0, 1};
+    axis = axis.normalized();
+
+    // Direction to tilt: perpendicular to tool axis and pointing away from
+    // the fixture block (away from the XY origin, which is the fixture centre)
+    Geom::Vec3 toObstacle{-pt.position.x, -pt.position.y, 0.0};
+    if (toObstacle.length() < 1e-6) toObstacle = {1.0, 0.0, 0.0};
+    toObstacle = toObstacle.normalized();
+
+    // Remove the component along the tool axis so we get a pure side direction
+    Geom::Vec3 sideDir = toObstacle - axis * toObstacle.dot(axis);
+    if (sideDir.length() < 1e-6) {
+        // Axis is aligned with obstacle direction – use X as fallback
+        sideDir = Geom::Vec3{1,0,0} - axis * axis.x;
+    }
+    sideDir = sideDir.normalized();
+
+    // Determine tilt strategy
+    bool useSide = true;
+    if (params.strategy == CollisionControlParams::TiltStrategy::LeadLag)
+        useSide = false;
+    else if (params.strategy == CollisionControlParams::TiltStrategy::Auto) {
+        // Side-tilt is generally preferred for holder avoidance
+        useSide = true;
+    }
+
+    // Rotate tool axis by tiltRad around sideDir (cross product gives rotation axis)
+    Geom::Vec3 rotAxis = useSide ? sideDir.cross(axis).normalized()
+                                 : sideDir;
+    if (rotAxis.length() < 1e-6) rotAxis = {0, 1, 0};
+    rotAxis = rotAxis.normalized();
+
+    // Rodrigues' rotation formula: rotate 'axis' by tiltRad around 'rotAxis'
+    Geom::Vec3 newAxis = axis * std::cos(tiltRad)
+                       + rotAxis.cross(axis) * std::sin(tiltRad)
+                       + rotAxis * (rotAxis.dot(axis) * (1.0 - std::cos(tiltRad)));
+    newAxis = newAxis.normalized();
+
+    // Verify the new axis satisfies IK limits
+    double a, b;
+    bool ikOk = MultiAxis::inverseKinematics(newAxis, m_model.kinematics, a, b);
+    if (!ikOk) {
+        // Try tilting in the opposite direction
+        newAxis = axis * std::cos(-tiltRad)
+                + rotAxis.cross(axis) * std::sin(-tiltRad)
+                + rotAxis * (rotAxis.dot(axis) * (1.0 - std::cos(-tiltRad)));
+        newAxis = newAxis.normalized();
+        ikOk = MultiAxis::inverseKinematics(newAxis, m_model.kinematics, a, b);
+        if (!ikOk)
+            return result;  // cannot fix within machine limits
+    }
+
+    result.tiltApplied  = true;
+    result.adjustedAxis = newAxis;
+    result.tiltAngleDeg = tiltDeg;
+    result.tiltType     = useSide ? TiltAvoidanceResult::TiltType::SideTilt
+                                  : TiltAvoidanceResult::TiltType::LeadLag;
+    return result;
+}
+
+// --------------------------------------------------------------------------
+// applyTiltAvoidance – apply computeTiltAvoidance to every point of a
+// toolpath and smooth the tilt transitions over params.smoothingRadius.
+// --------------------------------------------------------------------------
+void MachineSimulation::applyTiltAvoidance(
+        Toolpath& tp,
+        const CollisionControlParams& params) const {
+
+    if (tp.points().empty()) return;
+
+    // Copy the points so we still have them after clearPoints()
+    std::vector<ToolpathPoint> pts = tp.points();
+    std::size_t n                  = pts.size();
+
+    // First pass: compute avoidance for each point
+    std::vector<Geom::Vec3> adjustedAxes(n);
+    std::vector<bool>       tiltFlags(n, false);
+    for (std::size_t i = 0; i < n; ++i) {
+        auto res = computeTiltAvoidance(pts[i], tp.tool(), params);
+        adjustedAxes[i] = res.adjustedAxis;
+        tiltFlags[i]    = res.tiltApplied;
+    }
+
+    // Second pass: smooth tilt transitions using the smoothing radius.
+    // For each point where tilt changes, blend the tool axis over a window
+    // proportional to params.smoothingRadius.
+    std::vector<Geom::Vec3> smoothed = adjustedAxes;
+    if (params.smoothingRadius > 0.0 && n > 1) {
+        // Build cumulative arc-length
+        std::vector<double> arcLen(n, 0.0);
+        for (std::size_t i = 1; i < n; ++i) {
+            arcLen[i] = arcLen[i-1] + (pts[i].position - pts[i-1].position).length();
+        }
+
+        for (std::size_t i = 0; i < n; ++i) {
+            // Gather all points within the smoothing window
+            double lo = arcLen[i] - params.smoothingRadius;
+            double hi = arcLen[i] + params.smoothingRadius;
+
+            Geom::Vec3 sumAxis{0,0,0};
+            int        count = 0;
+            for (std::size_t j = 0; j < n; ++j) {
+                if (arcLen[j] >= lo && arcLen[j] <= hi) {
+                    sumAxis = sumAxis + adjustedAxes[j];
+                    ++count;
+                }
+            }
+            if (count > 0) {
+                Geom::Vec3 avg{sumAxis.x / count,
+                               sumAxis.y / count,
+                               sumAxis.z / count};
+                if (avg.length() > 1e-6)
+                    smoothed[i] = avg.normalized();
+            }
+        }
+    }
+
+    // Apply smoothed axes back to the toolpath points
+    tp.clearPoints();
+    for (std::size_t i = 0; i < n; ++i) {
+        ToolpathPoint pt = pts[i];
+        pt.toolAxis = smoothed[i];
+        tp.addPoint(pt);
+    }
 }
 
 // --------------------------------------------------------------------------
