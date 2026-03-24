@@ -41,6 +41,45 @@ constexpr int IDM_VIEW_ISOMETRIC  = 3004;
 constexpr int IDM_VIEW_FRONT      = 3005;
 constexpr int IDM_VIEW_TOP        = 3006;
 constexpr int IDM_VIEW_RIGHT      = 3007;
+constexpr int IDM_VIEW_BACK       = 3008;
+constexpr int IDM_VIEW_BOTTOM     = 3009;
+constexpr int IDM_VIEW_LEFT       = 3010;
+constexpr int IDM_VIEW_FIT        = 3011;  // Fit-to-screen
+
+// Wireframe tab commands
+constexpr int IDM_WF_POINT        = 4001;
+constexpr int IDM_WF_LINE         = 4002;
+constexpr int IDM_WF_ARC          = 4003;
+constexpr int IDM_WF_SPLINE       = 4004;
+constexpr int IDM_WF_CIRCLE       = 4005;
+constexpr int IDM_WF_RECTANGLE    = 4006;
+constexpr int IDM_WF_POLYGON      = 4007;
+
+// Surfaces tab commands
+constexpr int IDM_SURF_LOFT       = 4101;
+constexpr int IDM_SURF_REVOLVE    = 4102;
+constexpr int IDM_SURF_FILLET     = 4103;
+constexpr int IDM_SURF_OFFSET     = 4104;
+constexpr int IDM_SURF_TRIM       = 4105;
+constexpr int IDM_SURF_UNTRIM     = 4106;
+constexpr int IDM_SURF_EXTEND     = 4107;
+
+// Solids tab commands
+constexpr int IDM_SOLID_EXTRUDE   = 4201;
+constexpr int IDM_SOLID_REVOLVE   = 4202;
+constexpr int IDM_SOLID_UNION     = 4203;
+constexpr int IDM_SOLID_SUBTRACT  = 4204;
+constexpr int IDM_SOLID_INTERSECT = 4205;
+constexpr int IDM_SOLID_SHELL     = 4206;
+constexpr int IDM_SOLID_FILLET    = 4207;
+
+// Model Prep tab commands
+constexpr int IDM_PREP_HEAL       = 4301;
+constexpr int IDM_PREP_REM_FILLET = 4302;
+constexpr int IDM_PREP_BOUNDS     = 4303;
+constexpr int IDM_PREP_CLASSIFY   = 4304;
+constexpr int IDM_PREP_DRAFT      = 4305;
+constexpr int IDM_PREP_SPLIT      = 4306;
 
 constexpr int IDM_HELP_ABOUT      = 9001;
 
@@ -102,10 +141,11 @@ private:
     std::unique_ptr<LevelsManager>    m_levelsMgr;
     std::unique_ptr<PlanesManager>    m_planesMgr;
 
-    static constexpr const wchar_t* CLASS_NAME = L"CAMExpertMainWnd";
-    static constexpr int MANAGERS_PANEL_WIDTH  = 280;
-    static constexpr int RIBBON_HEIGHT         = 100;
-    static constexpr int STATUS_BAR_HEIGHT     = 22;
+    static constexpr const wchar_t* CLASS_NAME        = L"CAMExpertMainWnd";
+    static constexpr int MANAGERS_PANEL_WIDTH          = 280;
+    static constexpr int RIBBON_HEIGHT                 = 100;
+    static constexpr int STATUS_BAR_HEIGHT             = 22;
+    static constexpr int SELECTION_BAR_WIDTH           = 40;  // wider for buttons
 };
 
 #endif // MAINWINDOW_H

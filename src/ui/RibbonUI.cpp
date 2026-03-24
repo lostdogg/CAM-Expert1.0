@@ -68,22 +68,77 @@ void RibbonUI::buildHomeTab() {
 }
 
 void RibbonUI::buildWireframeTab() {
-    RibbonTab tab; tab.name = "Wireframe";
+    RibbonTab tab;
+    tab.name = "Wireframe";
+    RibbonGroup draw{"Draw", {
+        {IDM_WF_POINT,     "Point",     "Create a point"},
+        {IDM_WF_LINE,      "Line",      "Create a line segment"},
+        {IDM_WF_ARC,       "Arc",       "Create an arc (3-point)"},
+        {IDM_WF_CIRCLE,    "Circle",    "Create a circle"},
+        {IDM_WF_RECTANGLE, "Rectangle", "Create a rectangle"},
+        {IDM_WF_POLYGON,   "Polygon",   "Create a regular polygon"},
+        {IDM_WF_SPLINE,    "Spline",    "Create a NURBS spline"}
+    }};
+    tab.groups.push_back(draw);
     addTab(tab);
 }
 
 void RibbonUI::buildSurfacesTab() {
-    RibbonTab tab; tab.name = "Surfaces";
+    RibbonTab tab;
+    tab.name = "Surfaces";
+    RibbonGroup create{"Create", {
+        {IDM_SURF_LOFT,    "Loft",    "Loft surface through cross-sections"},
+        {IDM_SURF_REVOLVE, "Revolve", "Revolve a curve about an axis"},
+        {IDM_SURF_EXTEND,  "Extend",  "Extend a surface to meet another"}
+    }};
+    RibbonGroup edit{"Edit", {
+        {IDM_SURF_FILLET,  "Fillet",  "Fillet between two surfaces"},
+        {IDM_SURF_OFFSET,  "Offset",  "Offset a surface by a distance"},
+        {IDM_SURF_TRIM,    "Trim",    "Trim surface with a cutting curve"},
+        {IDM_SURF_UNTRIM,  "Untrim",  "Remove trim boundaries from surface"}
+    }};
+    tab.groups.push_back(create);
+    tab.groups.push_back(edit);
     addTab(tab);
 }
 
 void RibbonUI::buildSolidsTab() {
-    RibbonTab tab; tab.name = "Solids";
+    RibbonTab tab;
+    tab.name = "Solids";
+    RibbonGroup create{"Create", {
+        {IDM_SOLID_EXTRUDE,  "Extrude",   "Extrude a profile into a solid"},
+        {IDM_SOLID_REVOLVE,  "Revolve",   "Revolve a profile into a solid"}
+    }};
+    RibbonGroup boolean_{"Boolean", {
+        {IDM_SOLID_UNION,    "Union",     "Boolean union of two solids"},
+        {IDM_SOLID_SUBTRACT, "Subtract",  "Boolean subtract from a solid"},
+        {IDM_SOLID_INTERSECT,"Intersect", "Boolean intersection of two solids"}
+    }};
+    RibbonGroup modify{"Modify", {
+        {IDM_SOLID_FILLET,   "Fillet",    "Add a fillet edge to a solid"},
+        {IDM_SOLID_SHELL,    "Shell",     "Shell/hollow a solid body"}
+    }};
+    tab.groups.push_back(create);
+    tab.groups.push_back(boolean_);
+    tab.groups.push_back(modify);
     addTab(tab);
 }
 
 void RibbonUI::buildModelPrepTab() {
-    RibbonTab tab; tab.name = "Model Prep";
+    RibbonTab tab;
+    tab.name = "Model Prep";
+    RibbonGroup repair{"Repair", {
+        {IDM_PREP_HEAL,      "Heal",       "Heal gaps and surface inconsistencies"},
+        {IDM_PREP_REM_FILLET,"Rem. Fillet","Remove small fillet faces"},
+        {IDM_PREP_SPLIT,     "Split",      "Split solid at a plane"}
+    }};
+    RibbonGroup analyse{"Analyse", {
+        {IDM_PREP_BOUNDS,    "Boundaries", "Extract boundary curves"},
+        {IDM_PREP_CLASSIFY,  "Classify",   "Classify features (holes, pockets, bosses)"},
+        {IDM_PREP_DRAFT,     "Draft",      "Check draft angle for moulding"}
+    }};
+    tab.groups.push_back(repair);
+    tab.groups.push_back(analyse);
     addTab(tab);
 }
 
@@ -109,13 +164,20 @@ void RibbonUI::buildViewTab() {
         {IDM_VIEW_TRANSLU,   "Translucent","Translucent display"}
     }};
     RibbonGroup view{"View Direction", {
-        {IDM_VIEW_ISOMETRIC, "ISO",   "Isometric view"},
-        {IDM_VIEW_TOP,       "Top",   "Top view"},
-        {IDM_VIEW_FRONT,     "Front", "Front view"},
-        {IDM_VIEW_RIGHT,     "Right", "Right view"}
+        {IDM_VIEW_ISOMETRIC, "ISO",    "Isometric view"},
+        {IDM_VIEW_TOP,       "Top",    "Top view"},
+        {IDM_VIEW_FRONT,     "Front",  "Front view"},
+        {IDM_VIEW_RIGHT,     "Right",  "Right view"},
+        {IDM_VIEW_BACK,      "Back",   "Back view"},
+        {IDM_VIEW_BOTTOM,    "Bottom", "Bottom view"},
+        {IDM_VIEW_LEFT,      "Left",   "Left view"}
+    }};
+    RibbonGroup fit{"Zoom", {
+        {IDM_VIEW_FIT, "Fit All", "Fit all geometry in view"}
     }};
     tab.groups.push_back(mode);
     tab.groups.push_back(view);
+    tab.groups.push_back(fit);
     addTab(tab);
 }
 

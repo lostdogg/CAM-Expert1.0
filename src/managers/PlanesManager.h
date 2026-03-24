@@ -72,6 +72,12 @@ public:
     static CoordPlane standardRight();
     static CoordPlane standardIsometric();
 
+    // Rename an existing plane
+    void renamePlane(int id, const std::string& name);
+
+    // Update the WCS offset (G54-G59) for a WCS-type plane
+    void setWcsOffset(int id, int wcsOffsetNumber);
+
     using ChangeCallback = std::function<void()>;
     void setOnChange(ChangeCallback cb) { m_onChange = std::move(cb); }
 

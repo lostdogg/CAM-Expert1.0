@@ -122,6 +122,9 @@ struct Mat4 {
         return r;
     }
 
+    // Rotation about an arbitrary axis by angleRad radians (Rodrigues' formula)
+    static Mat4 rotate(Vec3 axis, double angleRad);
+
     Vec3 transformPoint(const Vec3& p) const {
         double w = m[3]*p.x + m[7]*p.y + m[11]*p.z + m[15];
         return {
@@ -130,7 +133,41 @@ struct Mat4 {
             (m[2]*p.x + m[6]*p.y + m[10]*p.z + m[14]) / w
         };
     }
+
+    Vec3 transformVector(const Vec3& v) const {
+        return {
+            m[0]*v.x + m[4]*v.y + m[8] *v.z,
+            m[1]*v.x + m[5]*v.y + m[9] *v.z,
+            m[2]*v.x + m[6]*v.y + m[10]*v.z
+        };
+    }
 };
+
+// --------------------------------------------------------------------------
+// Non-inline geometry utilities (defined in Geometry.cpp)
+// --------------------------------------------------------------------------
+
+double clamp(double v, double lo, double hi);
+double lerp(double a, double b, double t);
+Vec3   lerp3(const Vec3& a, const Vec3& b, double t);
+
+// Closest point on segment [p0,p1] to point p; optionally returns parameter t
+Vec3   closestPointOnSegment(const Vec3& p, const Vec3& p0, const Vec3& p1,
+                              double* tOut = nullptr);
+
+// Area of triangle with vertices a,b,c
+double triArea(const Vec3& a, const Vec3& b, const Vec3& c);
+
+// Möller–Trumbore ray-triangle intersection; returns true on hit, sets tHit
+bool   rayTriangleIntersect(const Ray& ray, const Triangle& tri,
+                             double& tHit, double epsilon = 1e-9);
+
+// AABB / overlap tests
+bool   pointInAABB(const Vec3& p, const AABB& box);
+bool   aabbsOverlap(const AABB& a, const AABB& b);
+
+// Compose two 4×4 column-major matrices
+Mat4   matMul(const Mat4& A, const Mat4& B);
 
 } // namespace Geom
 

@@ -113,3 +113,12 @@ CoordPlane PlanesManager::standardIsometric() {
 // --------------------------------------------------------------------------
 int  PlanesManager::nextId() { return m_nextId++; }
 void PlanesManager::notify() { if (m_onChange) m_onChange(); }
+
+// --------------------------------------------------------------------------
+void PlanesManager::renamePlane(int id, const std::string& name) {
+    if (auto* p = findPlane(id)) { p->name = name; notify(); }
+}
+
+void PlanesManager::setWcsOffset(int id, int wcsOffsetNumber) {
+    if (auto* p = findPlane(id)) { p->wcsOffset = wcsOffsetNumber; notify(); }
+}

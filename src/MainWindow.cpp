@@ -16,6 +16,7 @@
 #include <shlobj.h>
 #include <string>
 #include <sstream>
+#include <cstdio>
 
 // --------------------------------------------------------------------------
 MainWindow::MainWindow() = default;
@@ -156,6 +157,30 @@ void MainWindow::onCreate() {
     m_solidsMgr   = std::make_unique<SolidsManager>();
     m_levelsMgr   = std::make_unique<LevelsManager>();
     m_planesMgr   = std::make_unique<PlanesManager>();
+
+    // Connect toolpath manager to the viewport so toolpaths are rendered live
+    m_viewport->setToolpathManager(m_toolpathMgr.get());
+
+    // Connect the toolpath manager change callback to trigger a viewport redraw
+    m_toolpathMgr->setOnChange([this]() {
+        if (m_viewport) m_viewport->redraw();
+    });
+
+    // Connect the selection bar mask callback to the status bar
+    if (m_selectionBar) {
+        m_selectionBar->setMaskCallback([this](SelectMask mask) {
+            const wchar_t* names[] = {
+                L"Mask: All", L"Mask: Points", L"Mask: Lines",
+                L"Mask: Arcs", L"Mask: Splines", L"Mask: Surfaces",
+                L"Mask: Solids", L"Mask: Holes", L"Mask: Planar Faces",
+                L"Mask: None"
+            };
+            int idx = static_cast<int>(mask);
+            if (idx >= 0 && idx < 10)
+                SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+                    reinterpret_cast<LPARAM>(names[idx]));
+        });
+    }
 }
 
 // --------------------------------------------------------------------------
@@ -219,8 +244,11 @@ void MainWindow::updateLayout(int cx, int cy) {
 
     int viewY  = RIBBON_HEIGHT;
     int viewH  = cy - RIBBON_HEIGHT - STATUS_BAR_HEIGHT;
-    int viewX  = MANAGERS_PANEL_WIDTH;
-    int viewW  = cx - MANAGERS_PANEL_WIDTH;
+
+    // Selection bar sits on the right edge of the window
+    int selBarX = cx - SELECTION_BAR_WIDTH;
+    int viewX   = MANAGERS_PANEL_WIDTH;
+    int viewW   = cx - MANAGERS_PANEL_WIDTH - SELECTION_BAR_WIDTH;
 
     // Managers panel
     if (m_hManagersPanel)
@@ -236,9 +264,9 @@ void MainWindow::updateLayout(int cx, int cy) {
     if (m_viewport)
         m_viewport->resize(viewX, viewY, viewW, viewH);
 
-    // Selection bar (right edge of the managers panel)
+    // Selection bar (right edge of the window)
     if (m_selectionBar)
-        m_selectionBar->resize(cx - 30, viewY, 30, viewH);
+        m_selectionBar->resize(selBarX, viewY, SELECTION_BAR_WIDTH, viewH);
 }
 
 // --------------------------------------------------------------------------
@@ -276,6 +304,51 @@ void MainWindow::onCommand(int id) {
         break;
     case IDM_VIEW_RIGHT:
         if (m_viewport) m_viewport->setView(ViewPreset::Right);
+        break;
+    case IDM_VIEW_BACK:
+        if (m_viewport) m_viewport->setView(ViewPreset::Back);
+        break;
+    case IDM_VIEW_BOTTOM:
+        if (m_viewport) m_viewport->setView(ViewPreset::Bottom);
+        break;
+    case IDM_VIEW_LEFT:
+        if (m_viewport) m_viewport->setView(ViewPreset::Left);
+        break;
+    case IDM_VIEW_FIT:
+        if (m_viewport) { m_viewport->reset(); }
+        break;
+
+    // Wireframe / Surfaces / Solids / Model Prep – placeholder handlers
+    // (real geometry creation would open a dialog or enable a creation mode)
+    case IDM_WF_POINT:
+    case IDM_WF_LINE:
+    case IDM_WF_ARC:
+    case IDM_WF_CIRCLE:
+    case IDM_WF_RECTANGLE:
+    case IDM_WF_POLYGON:
+    case IDM_WF_SPLINE:
+    case IDM_SURF_LOFT:
+    case IDM_SURF_REVOLVE:
+    case IDM_SURF_EXTEND:
+    case IDM_SURF_FILLET:
+    case IDM_SURF_OFFSET:
+    case IDM_SURF_TRIM:
+    case IDM_SURF_UNTRIM:
+    case IDM_SOLID_EXTRUDE:
+    case IDM_SOLID_REVOLVE:
+    case IDM_SOLID_UNION:
+    case IDM_SOLID_SUBTRACT:
+    case IDM_SOLID_INTERSECT:
+    case IDM_SOLID_FILLET:
+    case IDM_SOLID_SHELL:
+    case IDM_PREP_HEAL:
+    case IDM_PREP_REM_FILLET:
+    case IDM_PREP_SPLIT:
+    case IDM_PREP_BOUNDS:
+    case IDM_PREP_CLASSIFY:
+    case IDM_PREP_DRAFT:
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Command received (geometry creation not yet implemented)."));
         break;
 
     case IDM_HELP_ABOUT:
@@ -395,29 +468,61 @@ void MainWindow::postProcess() {
         MessageBoxW(m_hwnd,
             L"Post-processing complete. NC file generated.",
             L"Post-Processor", MB_OK | MB_ICONINFORMATION);
+    } else {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Post-Processor: no toolpaths to process."));
     }
 }
 
 // --------------------------------------------------------------------------
 void MainWindow::runVerify() {
     Verify v;
-    v.run(m_toolpathMgr.get());
+    VerifyResult result = v.run(m_toolpathMgr.get());
+    std::wstring msg = L"Verify complete.";
+    if (result.hasGouge) {
+        // Format max gouge depth to 2 decimal places.
+        char depthBuf[32];
+        int written = std::snprintf(depthBuf, sizeof(depthBuf),
+                                    "%.2f", result.maxGougeDepth);
+        std::wstring depthStr(depthBuf,
+                              depthBuf + (written > 0 ? written : 0));
+        msg += L"  GOUGE detected ("
+            + std::to_wstring(result.gougeCount) + L" cells, max depth "
+            + depthStr + L" mm).";
+    } else {
+        msg += L"  No gouges detected.";
+    }
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-        reinterpret_cast<LPARAM>(L"Verification complete."));
+        reinterpret_cast<LPARAM>(msg.c_str()));
 }
 
 // --------------------------------------------------------------------------
 void MainWindow::runBackplot() {
     Backplot bp;
-    bp.run(m_toolpathMgr.get());
+    int moveCount = 0;
+    bp.run(m_toolpathMgr.get(), [&moveCount](const BackplotMove&) {
+        ++moveCount;
+    });
+    std::wstring msg = L"Backplot: "
+        + std::to_wstring(moveCount) + L" moves across "
+        + std::to_wstring(m_toolpathMgr->count()) + L" operation(s).";
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-        reinterpret_cast<LPARAM>(L"Backplot complete."));
+        reinterpret_cast<LPARAM>(msg.c_str()));
 }
 
 // --------------------------------------------------------------------------
 void MainWindow::runMachineSim() {
     MachineSimulation sim;
-    sim.run(m_toolpathMgr.get());
+    CollisionResult result = sim.run(m_toolpathMgr.get());
+    std::wstring msg = L"Machine Sim: ";
+    if (result.hasCollision) {
+        msg += L"COLLISION at move " + std::to_wstring(result.collisionMoveIdx)
+            + L". " + std::wstring(result.description.begin(), result.description.end());
+    } else if (result.hasOverTravel) {
+        msg += L"OVER-TRAVEL at move " + std::to_wstring(result.overTravelMoveIdx) + L".";
+    } else {
+        msg += L"No collisions or over-travel detected.";
+    }
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-        reinterpret_cast<LPARAM>(L"Machine simulation complete."));
+        reinterpret_cast<LPARAM>(msg.c_str()));
 }

@@ -9,6 +9,7 @@ LevelsManager::LevelsManager() {
     def.visible     = true;
     def.locked      = false;
     def.color       = "#FFFFFF";
+    def.description = "Default geometry level";
     m_levels.push_back(def);
     m_nextId = 2;
 }
@@ -35,7 +36,9 @@ void LevelsManager::clear() {
     m_nextId = 1;
     // Restore default level
     Level def;
-    def.id = 1; def.name = "Default";
+    def.id          = 1;
+    def.name        = "Default";
+    def.description = "Default geometry level";
     m_levels.push_back(def);
     m_nextId = 2;
     notify();
@@ -63,6 +66,23 @@ void LevelsManager::setLocked(int levelId, bool locked) {
 
 void LevelsManager::setColor(int levelId, const std::string& hex) {
     if (auto* lv = findLevel(levelId)) { lv->color = hex; notify(); }
+}
+
+void LevelsManager::renameLevel(int levelId, const std::string& name) {
+    if (auto* lv = findLevel(levelId)) { lv->name = name; notify(); }
+}
+
+void LevelsManager::setDescription(int levelId, const std::string& desc) {
+    if (auto* lv = findLevel(levelId)) { lv->description = desc; notify(); }
+}
+
+void LevelsManager::setEntityCount(int levelId, int count) {
+    if (auto* lv = findLevel(levelId)) { lv->entityCount = count; }
+}
+
+void LevelsManager::setAllVisible(bool vis) {
+    for (auto& lv : m_levels) lv.visible = vis;
+    notify();
 }
 
 int LevelsManager::count() const { return static_cast<int>(m_levels.size()); }

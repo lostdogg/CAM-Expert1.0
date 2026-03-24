@@ -3,6 +3,7 @@
 #define SOLIDS_MANAGER_H
 
 #include "../cad/BRep.h"
+#include "../cad/Geometry.h"
 #include <vector>
 #include <string>
 #include <functional>
@@ -38,6 +39,18 @@ public:
     void setVisible(int index, bool visible);
     void setSelected(int index, bool selected);
     void clearSelection();
+
+    // Rename the solid at the given index
+    void renameSolid(int index, const std::string& name);
+
+    // Assign the solid to a named layer
+    void setLayer(int index, const std::string& layer);
+
+    // Return indices of all solids on the given layer
+    std::vector<int> indicesOnLayer(const std::string& layer) const;
+
+    // Return the aggregate bounding box of all visible solids
+    Geom::AABB aggregateBoundingBox() const;
 
     std::vector<int> selectedIndices() const;
 

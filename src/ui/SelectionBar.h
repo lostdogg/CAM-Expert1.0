@@ -37,12 +37,36 @@ public:
 
     SelectMask currentMask() const { return m_currentMask; }
 
+    // Highlight the button for the given mask and clear others
+    void setActiveMask(SelectMask mask);
+
     HWND hwnd() const { return m_hwnd; }
 
 private:
-    HWND       m_hwnd        = nullptr;
-    SelectMask m_currentMask = SelectMask::All;
-    MaskCallback m_callback;
+    static LRESULT CALLBACK BarProc(HWND hwnd, UINT msg,
+                                     WPARAM wParam, LPARAM lParam);
+    LRESULT handleMessage(UINT msg, WPARAM wParam, LPARAM lParam);
+    void    createButtons();
+    void    layoutButtons(int width, int height);
+
+    struct MaskButton {
+        HWND       hwnd   = nullptr;
+        SelectMask mask   = SelectMask::All;
+        std::wstring label;
+        std::wstring tooltip;
+        int        cmdId  = 0;
+    };
+
+    HWND             m_hwnd        = nullptr;
+    HINSTANCE        m_hInst       = nullptr;
+    HWND             m_hwndParent  = nullptr;
+    SelectMask       m_currentMask = SelectMask::All;
+    MaskCallback     m_callback;
+    std::vector<MaskButton> m_buttons;
+
+    static constexpr const wchar_t* CLASS_NAME = L"CAMExpertSelBar";
+    static constexpr int BTN_HEIGHT = 28;
+    static constexpr int BTN_BASE_ID = 6000;
 };
 
 #endif // SELECTION_BAR_H

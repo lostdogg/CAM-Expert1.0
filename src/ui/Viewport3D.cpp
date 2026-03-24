@@ -1,4 +1,5 @@
 #include "Viewport3D.h"
+#include "../managers/ToolpathManager.h"
 #include <gl/gl.h>
 #include <gl/glu.h>
 #include <cmath>
@@ -30,6 +31,12 @@ Viewport3D::~Viewport3D() {
 }
 
 // --------------------------------------------------------------------------
+void Viewport3D::setToolpathManager(const ToolpathManager* mgr) {
+    m_toolpathMgr = mgr;
+    redraw();
+}
+
+// --------------------------------------------------------------------------
 bool Viewport3D::initOpenGL() {
     m_hDC = GetDC(m_hwnd);
 
@@ -55,13 +62,16 @@ bool Viewport3D::initOpenGL() {
     glEnable(GL_LIGHTING);
     glEnable(GL_LIGHT0);
     glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
     glShadeModel(GL_SMOOTH);
 
     float ambient[]  = {0.2f, 0.2f, 0.2f, 1.0f};
     float diffuse[]  = {0.8f, 0.8f, 0.8f, 1.0f};
+    float specular[] = {0.4f, 0.4f, 0.4f, 1.0f};
     float lightPos[] = {100.0f, 200.0f, 300.0f, 1.0f};
     glLightfv(GL_LIGHT0, GL_AMBIENT,  ambient);
     glLightfv(GL_LIGHT0, GL_DIFFUSE,  diffuse);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, specular);
     glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
 
     glClearColor(0.18f, 0.18f, 0.22f, 1.0f); // dark grey background
@@ -127,6 +137,27 @@ void Viewport3D::redraw() {
 }
 
 // --------------------------------------------------------------------------
+// Map a MotionType to an RGB display colour
+void Viewport3D::motionColor(MotionType mt, float& r, float& g, float& b) {
+    switch (mt) {
+    case MotionType::Rapid:
+    case MotionType::MicroLift:
+        r = 1.0f; g = 1.0f; b = 0.0f; break;  // yellow – rapid traverse
+    case MotionType::PlungeFeed:
+        r = 1.0f; g = 0.3f; b = 0.3f; break;  // red – plunge
+    case MotionType::Retract:
+        r = 0.3f; g = 0.5f; b = 1.0f; break;  // blue – retract
+    case MotionType::ArcCW:
+    case MotionType::ArcCCW:
+        r = 0.8f; g = 0.4f; b = 1.0f; break;  // purple – arc motion
+    case MotionType::Dwell:
+        r = 1.0f; g = 0.5f; b = 0.0f; break;  // orange – dwell
+    default:
+        r = 0.0f; g = 1.0f; b = 0.0f; break;  // green – linear feed
+    }
+}
+
+// --------------------------------------------------------------------------
 void Viewport3D::render() {
     if (!m_hGLRC) return;
     wglMakeCurrent(m_hDC, m_hGLRC);
@@ -160,42 +191,32 @@ void Viewport3D::render() {
 
     drawGrid();
     drawAxes();
-
-    // Placeholder: draw a sample billet (box) to represent stock
-    glColor3f(0.6f, 0.6f, 0.8f);
-    glBegin(GL_QUADS);
-    // Front face
-    glNormal3f(0,  -1, 0); glVertex3f(-50,-50,-50); glVertex3f(50,-50,-50);
-                            glVertex3f(50,-50, 0);   glVertex3f(-50,-50, 0);
-    // Back face
-    glNormal3f(0,   1, 0); glVertex3f(-50, 50,-50); glVertex3f(-50, 50, 0);
-                            glVertex3f(50,  50, 0);  glVertex3f(50,  50,-50);
-    // Top face
-    glNormal3f(0, 0,  1);  glVertex3f(-50,-50, 0);  glVertex3f(50,-50, 0);
-                            glVertex3f(50,  50, 0);  glVertex3f(-50, 50, 0);
-    // Bottom face
-    glNormal3f(0, 0, -1);  glVertex3f(-50,-50,-50); glVertex3f(-50, 50,-50);
-                            glVertex3f(50,  50,-50); glVertex3f(50, -50,-50);
-    // Left face
-    glNormal3f(-1, 0, 0);  glVertex3f(-50,-50,-50); glVertex3f(-50,-50, 0);
-                            glVertex3f(-50, 50, 0);  glVertex3f(-50, 50,-50);
-    // Right face
-    glNormal3f( 1, 0, 0);  glVertex3f(50,-50,-50);  glVertex3f(50, 50,-50);
-                            glVertex3f(50, 50, 0);   glVertex3f(50,-50, 0);
-    glEnd();
+    drawStock();
+    drawToolpaths();
 
     SwapBuffers(m_hDC);
 }
 
 // --------------------------------------------------------------------------
+// Viewport visualization constants
+static constexpr int   kGridHighlightInterval = 5;     // every Nth grid line is brighter
+static constexpr float kMinAxisLength         = 0.5f;  // minimum length to treat toolAxis as valid
+static constexpr double kToolAxisTickLength   = 8.0;   // mm – length of tool-axis tick marks
+static constexpr int   kAxisTickInterval      = 10;    // draw a tick every N toolpath points
+
+// --------------------------------------------------------------------------
 void Viewport3D::drawGrid() {
     glDisable(GL_LIGHTING);
-    glColor3f(0.35f, 0.35f, 0.35f);
+    glColor3f(0.30f, 0.30f, 0.30f);
+    glLineWidth(1.0f);
     glBegin(GL_LINES);
-    for (int i = -10; i <= 10; ++i) {
+    for (int i = -20; i <= 20; ++i) {
         float fi = static_cast<float>(i) * 10.0f;
-        glVertex3f(fi, -100, 0); glVertex3f(fi, 100, 0);
-        glVertex3f(-100, fi, 0); glVertex3f(100, fi, 0);
+        // Highlight every kGridHighlightInterval-th line slightly brighter
+        float bright = (i % kGridHighlightInterval == 0) ? 0.45f : 0.30f;
+        glColor3f(bright, bright, bright);
+        glVertex3f(fi, -200, 0); glVertex3f(fi, 200, 0);
+        glVertex3f(-200, fi, 0); glVertex3f(200, fi, 0);
     }
     glEnd();
     glEnable(GL_LIGHTING);
@@ -204,12 +225,115 @@ void Viewport3D::drawGrid() {
 // --------------------------------------------------------------------------
 void Viewport3D::drawAxes() {
     glDisable(GL_LIGHTING);
-    glLineWidth(2.0f);
+    glLineWidth(2.5f);
     glBegin(GL_LINES);
-    glColor3f(1, 0, 0); glVertex3f(0,0,0); glVertex3f(30,0,0);  // X red
-    glColor3f(0, 1, 0); glVertex3f(0,0,0); glVertex3f(0,30,0);  // Y green
-    glColor3f(0, 0, 1); glVertex3f(0,0,0); glVertex3f(0,0,30);  // Z blue
+    // X – red
+    glColor3f(1.0f, 0.2f, 0.2f); glVertex3f(0,0,0); glVertex3f(40,0,0);
+    // Y – green
+    glColor3f(0.2f, 1.0f, 0.2f); glVertex3f(0,0,0); glVertex3f(0,40,0);
+    // Z – blue
+    glColor3f(0.2f, 0.4f, 1.0f); glVertex3f(0,0,0); glVertex3f(0,0,40);
     glEnd();
+    glLineWidth(1.0f);
+    glEnable(GL_LIGHTING);
+}
+
+// --------------------------------------------------------------------------
+// Draw a semi-transparent stock billet (100×100×50 mm box centred at origin)
+void Viewport3D::drawStock() {
+    if (m_renderMode == RenderMode::Wireframe) {
+        glDisable(GL_LIGHTING);
+        glColor3f(0.5f, 0.5f, 0.7f);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    } else {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(0.55f, 0.55f, 0.75f,
+                  m_renderMode == RenderMode::Translucent ? 0.35f : 0.80f);
+        glEnable(GL_LIGHTING);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    }
+
+    glBegin(GL_QUADS);
+    // Bottom face (Z = -50)
+    glNormal3f(0, 0, -1);
+    glVertex3f(-50,-50,-50); glVertex3f( 50,-50,-50);
+    glVertex3f( 50, 50,-50); glVertex3f(-50, 50,-50);
+    // Top face (Z = 0)
+    glNormal3f(0, 0, 1);
+    glVertex3f(-50,-50, 0); glVertex3f(-50, 50, 0);
+    glVertex3f( 50, 50, 0); glVertex3f( 50,-50, 0);
+    // Front face (Y = -50)
+    glNormal3f(0, -1, 0);
+    glVertex3f(-50,-50,-50); glVertex3f(-50,-50, 0);
+    glVertex3f( 50,-50, 0);  glVertex3f( 50,-50,-50);
+    // Back face (Y = 50)
+    glNormal3f(0, 1, 0);
+    glVertex3f(-50, 50,-50); glVertex3f( 50, 50,-50);
+    glVertex3f( 50, 50, 0);  glVertex3f(-50, 50, 0);
+    // Left face (X = -50)
+    glNormal3f(-1, 0, 0);
+    glVertex3f(-50,-50,-50); glVertex3f(-50, 50,-50);
+    glVertex3f(-50, 50, 0);  glVertex3f(-50,-50, 0);
+    // Right face (X = 50)
+    glNormal3f(1, 0, 0);
+    glVertex3f(50,-50,-50); glVertex3f( 50,-50, 0);
+    glVertex3f(50, 50, 0);  glVertex3f( 50, 50,-50);
+    glEnd();
+
+    if (m_renderMode != RenderMode::Wireframe) {
+        glDisable(GL_BLEND);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    } else {
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glEnable(GL_LIGHTING);
+    }
+}
+
+// --------------------------------------------------------------------------
+// Draw all toolpath moves colour-coded by motion type
+void Viewport3D::drawToolpaths() {
+    if (!m_toolpathMgr || m_toolpathMgr->count() == 0) return;
+
+    glDisable(GL_LIGHTING);
+    glLineWidth(1.5f);
+
+    for (int opIdx = 0; opIdx < m_toolpathMgr->count(); ++opIdx) {
+        const auto& tp  = m_toolpathMgr->at(opIdx);
+        const auto& pts = tp.points();
+        if (pts.size() < 2) continue;
+
+        glBegin(GL_LINE_STRIP);
+        for (const auto& pt : pts) {
+            float r, g, b;
+            motionColor(pt.motion, r, g, b);
+            glColor3f(r, g, b);
+            glVertex3d(pt.position.x, pt.position.y, pt.position.z);
+        }
+        glEnd();
+
+        // Draw tool-axis tick marks at every kAxisTickInterval-th point (multi-axis paths)
+        bool hasAxisInfo = false;
+        for (const auto& pt : pts) {
+            if (pt.toolAxis.length() > kMinAxisLength) { hasAxisInfo = true; break; }
+        }
+        if (hasAxisInfo) {
+            glColor3f(0.9f, 0.9f, 0.4f);
+            glBegin(GL_LINES);
+            for (std::size_t i = 0; i < pts.size(); i += kAxisTickInterval) {
+                const auto& pt = pts[i];
+                if (pt.toolAxis.length() < kMinAxisLength) continue;
+                double tx = pt.position.x, ty = pt.position.y, tz = pt.position.z;
+                double ex = tx + pt.toolAxis.x * kToolAxisTickLength;
+                double ey = ty + pt.toolAxis.y * kToolAxisTickLength;
+                double ez = tz + pt.toolAxis.z * kToolAxisTickLength;
+                glVertex3d(tx, ty, tz);
+                glVertex3d(ex, ey, ez);
+            }
+            glEnd();
+        }
+    }
+
     glLineWidth(1.0f);
     glEnable(GL_LIGHTING);
 }
@@ -272,15 +396,27 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         m_midDown = false;
         ReleaseCapture();
         return 0;
+    case WM_RBUTTONDOWN:
+        m_rightDown  = true;
+        m_lastMouseX = LOWORD(lParam);
+        m_lastMouseY = HIWORD(lParam);
+        SetCapture(m_hwnd);
+        return 0;
+    case WM_RBUTTONUP:
+        m_rightDown = false;
+        ReleaseCapture();
+        return 0;
     case WM_MOUSEMOVE: {
         int x = LOWORD(lParam), y = HIWORD(lParam);
         int dx = x - m_lastMouseX, dy = y - m_lastMouseY;
         if (m_leftDown) {
+            // Left drag: orbit
             m_camera.orbitX += dy * 0.5f;
             m_camera.orbitY += dx * 0.5f;
             redraw();
         }
-        if (m_midDown) {
+        if (m_midDown || m_rightDown) {
+            // Middle/right drag: pan
             m_camera.panX -= dx * 0.3f;
             m_camera.panY += dy * 0.3f;
             redraw();
@@ -290,7 +426,12 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     }
     case WM_MOUSEWHEEL: {
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-        m_camera.distance -= delta * 0.1f;
+        // Zoom by a fixed fraction of current distance per WHEEL_DELTA tick,
+        // giving consistent angular rate regardless of distance.
+        static constexpr float kZoomFraction = 0.12f; // 12% per wheel notch
+        float ticks    = static_cast<float>(delta) / WHEEL_DELTA;
+        float zoomStep = m_camera.distance * kZoomFraction * ticks;
+        m_camera.distance -= zoomStep;
         if (m_camera.distance < 1.0f) m_camera.distance = 1.0f;
         redraw();
         return 0;
