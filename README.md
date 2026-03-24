@@ -57,19 +57,23 @@
 
 ### Requirements
 - **Windows 10/11** (64-bit)
-- **MSVC 2019 or later** (Visual Studio) *or* **MinGW-w64 / Clang** with Win32 headers
-- **CMake 3.16+**
+- **MSVC 2019 or later** (Visual Studio 2019, 2022, or 2026) *or* **MinGW-w64 / Clang** with Win32 headers
+- **CMake 3.20+**
 - **OpenGL** (provided by Windows via `opengl32.lib` and `glu32.lib`)
 
 ### Build steps
+
+Choose the CMake generator that matches your installed Visual Studio version.
+
+#### Visual Studio 2026 (recommended — toolset v180)
 
 ```powershell
 # Clone and enter the repository
 git clone https://github.com/lostdogg/CAM-Expert1.0.git
 cd CAM-Expert1.0
 
-# Configure (Visual Studio 2022, x64)
-cmake -B build -G "Visual Studio 17 2022" -A x64
+# Configure (Visual Studio 2026, x64)
+cmake -B build -G "Visual Studio 18 2026" -A x64
 
 # Build Release
 cmake --build build --config Release
@@ -78,12 +82,45 @@ cmake --build build --config Release
 #   build/Release/CAMExpert.exe
 ```
 
-For MinGW-w64:
+#### Visual Studio 2022 (toolset v143)
+
+```powershell
+cmake -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release
+```
+
+#### Visual Studio 2019 (toolset v142)
+
+```powershell
+cmake -B build -G "Visual Studio 16 2019" -A x64
+cmake --build build --config Release
+```
+
+#### Using CMake Presets (any Visual Studio version)
+
+A `CMakePresets.json` is provided for convenience. List available presets and pick the one
+that matches your installed Visual Studio:
+
+```powershell
+cmake --list-presets          # list configure presets
+cmake --preset windows-vs2026 # configure with VS 2026
+cmake --build --preset release-vs2026
+
+# Other preset names: windows-vs2022, windows-vs2019, windows-mingw-release
+```
+
+#### MinGW-w64 / Clang
 
 ```bash
 cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
+
+> **Toolset mismatch?**  If you see error `MSB8020: The build tools for Visual Studio 20XX
+> (Platform Toolset = 'vYYY') cannot be found`, you are using a generator for a different
+> Visual Studio version than the one installed.  Use the generator that matches your
+> installed version (see the options above), or install the matching build tools via the
+> Visual Studio Installer.
 
 ---
 
@@ -92,6 +129,7 @@ cmake --build build
 ```
 CAM-Expert1.0/
 ├── CMakeLists.txt
+├── CMakePresets.json
 ├── src/
 │   ├── main.cpp                  # WinMain entry point
 │   ├── Application.h/.cpp        # Application singleton
