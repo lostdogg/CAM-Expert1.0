@@ -1,0 +1,218 @@
+#include "MultiAxis.h"
+#include <cmath>
+#include <algorithm>
+
+static constexpr double PIMA = 3.14159265358979323846;
+
+// --------------------------------------------------------------------------
+MultiAxis::MultiAxis(MultiAxisParams params)
+    : m_params(std::move(params)) {}
+
+// --------------------------------------------------------------------------
+// Inverse kinematics – resolve (A, B) rotation from a tool-axis vector.
+// The tool axis is expressed in the work-coordinate frame.
+// --------------------------------------------------------------------------
+bool MultiAxis::inverseKinematics(const Geom::Vec3& toolAxis,
+                                   const MachineKinematics& kin,
+                                   double& aOut, double& bOut) {
+    Geom::Vec3 ax = toolAxis.normalized();
+
+    // For a head-table machine (B rotates around Y, A rotates around X):
+    // ax = R_A * R_B * {0,0,1}
+    // B = asin(ax.x),  A = atan2(-ax.y, ax.z)
+    double B = std::asin(std::max(-1.0, std::min(1.0, ax.x)));
+    double A = std::atan2(-ax.y, ax.z);
+
+    aOut = A * 180.0 / PIMA;
+    bOut = B * 180.0 / PIMA;
+
+    // Clamp to travel limits
+    if (aOut < kin.aAxisMin || aOut > kin.aAxisMax) return false;
+    if (bOut < kin.bAxisMin || bOut > kin.bAxisMax) return false;
+    return true;
+}
+
+// --------------------------------------------------------------------------
+// Apply lead/lag tilt: rotate each tool axis by leadDeg forward and lagDeg back
+// --------------------------------------------------------------------------
+void MultiAxis::applyLeadLag(Toolpath& tp, double leadDeg, double /*lagDeg*/) {
+    const auto& pts = tp.points();
+    if (pts.size() < 2) return;
+
+    std::vector<ToolpathPoint> result;
+    result.reserve(pts.size());
+
+    for (std::size_t i = 0; i < pts.size(); ++i) {
+        ToolpathPoint pt = pts[i];
+        if (i + 1 < pts.size()) {
+            // Forward motion direction
+            Geom::Vec3 fwd = pts[i+1].position - pts[i].position;
+            if (fwd.length() > 1e-9) {
+                fwd = fwd.normalized();
+                // Lead tilt: rotate toolAxis toward fwd by leadDeg
+                double rad = leadDeg * PIMA / 180.0;
+                pt.toolAxis = (pt.toolAxis + fwd * std::tan(rad)).normalized();
+            }
+        }
+        result.push_back(pt);
+    }
+
+    tp.clearPoints();
+    for (const auto& pt : result)
+        tp.addPoint(pt);
+}
+
+// --------------------------------------------------------------------------
+// 5-axis swarf machining along a ruled surface
+// --------------------------------------------------------------------------
+Toolpath MultiAxis::swarfMill(const NurbsSurface& surf,
+                               const CuttingTool& tool,
+                               const CuttingParams& cuts,
+                               int uSteps) {
+    Toolpath tp(StrategyType::Swarf4Axis, tool, cuts);
+    tp.setName("5-Axis Swarf");
+
+    double safeZ = 10.0;
+    ToolpathPoint safe;
+    safe.position = surf.evaluate(surf.uMin(), surf.vMin()) + Geom::Vec3{0,0,safeZ};
+    safe.toolAxis = {0, 0, 1};
+    safe.motion   = MotionType::Rapid;
+    tp.addPoint(safe);
+
+    // Walk along U parameter; at each U, place the tool tangent to the surface
+    for (int i = 0; i <= uSteps; ++i) {
+        double u = surf.uMin() + (surf.uMax() - surf.uMin()) * i / uSteps;
+        double v = (surf.vMin() + surf.vMax()) * 0.5;
+
+        Geom::Vec3 pt  = surf.evaluate(u, v);
+        Geom::Vec3 dU  = surf.derivU(u, v).normalized();
+        Geom::Vec3 n   = surf.normal(u, v);
+
+        // Tool axis = surface tangent along V (swarf direction)
+        Geom::Vec3 dV  = surf.derivV(u, v).normalized();
+        Geom::Vec3 axis = dV;
+
+        // Gouge-protect: tilt by lead angle if enabled
+        double leadRad = m_params.leadAngle * PIMA / 180.0;
+        axis = (axis + dU * std::sin(leadRad)).normalized();
+
+        // Offset by tool diameter in normal direction
+        Geom::Vec3 tipPos = pt + n * (tool.diameter * 0.5 + m_params.stockAllowance);
+
+        // Inverse kinematics check
+        double a, b;
+        if (m_params.kinematics.type != MachineKinematics::Type::Head_Table ||
+            inverseKinematics(axis, m_params.kinematics, a, b)) {
+            ToolpathPoint tpt;
+            tpt.position = tipPos;
+            tpt.toolAxis = axis;
+            tpt.motion   = (i == 0) ? MotionType::PlungeFeed : MotionType::Linear;
+            tp.addPoint(tpt);
+        }
+    }
+
+    tp.markClean();
+    return tp;
+}
+
+// --------------------------------------------------------------------------
+// 4-axis rotary wrap: project a 2-D profile around a cylinder
+// --------------------------------------------------------------------------
+Toolpath MultiAxis::rotaryWrap(const std::vector<Geom::Vec2>& profile2D,
+                                double cylinderRadius,
+                                const CuttingTool& tool,
+                                const CuttingParams& cuts,
+                                int /*steps*/) {
+    Toolpath tp(StrategyType::Swarf4Axis, tool, cuts);
+    tp.setName("4-Axis Rotary Wrap");
+
+    // 2-D profile is (X=axial position, Y=surface distance)
+    // Y is mapped to a rotation angle A around the X axis
+    double circumference = 2.0 * PIMA * cylinderRadius;
+
+    ToolpathPoint safe;
+    safe.position = {0, 0, cylinderRadius + 5.0};
+    safe.toolAxis = {0, 0, 1};
+    safe.motion   = MotionType::Rapid;
+    tp.addPoint(safe);
+
+    for (const auto& p2 : profile2D) {
+        double axial   = p2.x;
+        double angle   = (p2.y / circumference) * 2.0 * PIMA;
+        double r       = cylinderRadius + m_params.stockAllowance;
+
+        Geom::Vec3 toolAxis{0,
+                            -std::sin(angle),
+                             std::cos(angle)};  // radial outward
+
+        ToolpathPoint pt;
+        pt.position = {axial,
+                       r * std::sin(angle),
+                       r * std::cos(angle)};
+        pt.toolAxis = toolAxis;
+        pt.motion   = MotionType::Linear;
+        tp.addPoint(pt);
+    }
+
+    tp.markClean();
+    return tp;
+}
+
+// --------------------------------------------------------------------------
+// 5-axis normal-to-surface (ball end-mill always perpendicular to surface)
+// --------------------------------------------------------------------------
+Toolpath MultiAxis::normalToSurface(const NurbsSurface& surf,
+                                     const CuttingTool& tool,
+                                     const CuttingParams& cuts,
+                                     int uSteps, int vSteps) {
+    Toolpath tp(StrategyType::Multiaxis5, tool, cuts);
+    tp.setName("5-Axis Normal to Surface");
+
+    double ballR = tool.diameter * 0.5;
+    double safeZ = 10.0;
+
+    ToolpathPoint safe;
+    safe.position = surf.evaluate(surf.uMin(), surf.vMin()) + Geom::Vec3{0,0,safeZ};
+    safe.toolAxis = {0, 0, 1};
+    safe.motion   = MotionType::Rapid;
+    tp.addPoint(safe);
+
+    for (int i = 0; i <= uSteps; ++i) {
+        double u = surf.uMin() + (surf.uMax() - surf.uMin()) * i / uSteps;
+
+        for (int j = 0; j <= vSteps; ++j) {
+            double v = surf.vMin() + (surf.vMax() - surf.vMin()) * j / vSteps;
+
+            Geom::Vec3 pt   = surf.evaluate(u, v);
+            Geom::Vec3 n    = surf.normal(u, v);
+            Geom::Vec3 axis = n; // tool axis = surface normal
+
+            // Offset tool centre by ball radius along normal + stock allowance
+            Geom::Vec3 tip = pt + n * (ballR + m_params.stockAllowance);
+
+            // IK check
+            double a, b;
+            bool ikOk = inverseKinematics(axis, m_params.kinematics, a, b);
+
+            if (m_params.gougeProtect && !ikOk) continue;
+
+            ToolpathPoint tpt;
+            tpt.position = tip;
+            tpt.toolAxis = axis;
+            tpt.motion   = (i == 0 && j == 0) ? MotionType::PlungeFeed
+                                               : MotionType::Linear;
+            tp.addPoint(tpt);
+        }
+
+        // Retract and rapid to start of next pass
+        if (i < uSteps && !tp.points().empty()) {
+            ToolpathPoint ret = tp.points().back();
+            ret.position.z += safeZ;
+            ret.motion = MotionType::Retract;
+            tp.addPoint(ret);
+        }
+    }
+
+    tp.markClean();
+    return tp;
+}
