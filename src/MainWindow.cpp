@@ -463,7 +463,8 @@ void MainWindow::fileImport() {
 // --------------------------------------------------------------------------
 void MainWindow::postProcess() {
     PostProcessor pp;
-    auto gcode = pp.generate(m_toolpathMgr.get());
+    const CoordPlane* wcsPlane = m_planesMgr ? m_planesMgr->wcsPlane() : nullptr;
+    auto gcode = pp.generate(m_toolpathMgr.get(), wcsPlane);
     if (!gcode.empty()) {
         MessageBoxW(m_hwnd,
             L"Post-processing complete. NC file generated.",

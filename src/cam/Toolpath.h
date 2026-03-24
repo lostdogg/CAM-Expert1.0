@@ -116,6 +116,9 @@ public:
     void addPoint(const ToolpathPoint& pt) { m_points.push_back(pt); }
     void clearPoints()                     { m_points.clear(); }
 
+    // Non-const access for in-place transformations (e.g. TransformToolpath)
+    std::vector<ToolpathPoint>& mutablePoints() { return m_points; }
+
     // Total path length (sum of all move distances)
     double totalLength() const;
 
