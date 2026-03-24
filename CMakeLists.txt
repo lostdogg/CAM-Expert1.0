@@ -33,6 +33,8 @@ set(SOURCES
     src/cam/Turning.cpp
     src/cam/PostProcessor.cpp
     src/cam/NciFormat.cpp
+    src/cam/MaterialLibrary.cpp
+    src/cam/MillTurn.cpp
     src/managers/ToolpathManager.cpp
     src/managers/SolidsManager.cpp
     src/managers/LevelsManager.cpp
@@ -64,6 +66,8 @@ set(HEADERS
     src/cam/Turning.h
     src/cam/PostProcessor.h
     src/cam/NciFormat.h
+    src/cam/MaterialLibrary.h
+    src/cam/MillTurn.h
     src/managers/ToolpathManager.h
     src/managers/SolidsManager.h
     src/managers/LevelsManager.h
