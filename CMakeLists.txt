@@ -37,6 +37,9 @@ set(SOURCES
     src/cam/MillTurn.cpp
     src/cam/SwissMachining.cpp
     src/cam/CloudToolLibrary.cpp
+    src/cam/DynamicPlane.cpp
+    src/cam/TransformToolpath.cpp
+    src/cam/ProbingCycles.cpp
     src/managers/ToolpathManager.cpp
     src/managers/SolidsManager.cpp
     src/managers/LevelsManager.cpp
@@ -72,6 +75,9 @@ set(HEADERS
     src/cam/MillTurn.h
     src/cam/SwissMachining.h
     src/cam/CloudToolLibrary.h
+    src/cam/DynamicPlane.h
+    src/cam/TransformToolpath.h
+    src/cam/ProbingCycles.h
     src/managers/ToolpathManager.h
     src/managers/SolidsManager.h
     src/managers/LevelsManager.h

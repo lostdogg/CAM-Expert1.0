@@ -4,6 +4,7 @@
 
 #include "Toolpath.h"
 #include "NciFormat.h"
+#include "../managers/PlanesManager.h"
 #include <string>
 #include <vector>
 #include <memory>
@@ -25,6 +26,17 @@ class ToolpathManager;
 //   • Program numbering   (O-number / program name)
 //   • Safety codes        (cancel cycles, reset modal state)
 //   • Sub-program support
+//
+// Work Offset (G54/G55/G56…) emission:
+//   The post uses the integer-based wcsOffset field on CoordPlane to decide
+//   which G-code register to output.  The mapping is:
+//     wcsOffset  -1  →  G54  (default, no explicit emit unless forced)
+//     wcsOffset   0  →  G54
+//     wcsOffset   1  →  G55
+//     wcsOffset   2  →  G56
+//     wcsOffset   n  →  G(54+n)   (n >= 0)
+//   In 4/5-axis positional ("3+2") work all planes share wcsOffset=0 (G54)
+//   so the machine stays on the same datum while the rotary axes index.
 //
 // Advanced features:
 //   • Axis over-travel detection – checks every coordinate against the
@@ -112,12 +124,15 @@ public:
     explicit PostProcessor(PostConfig cfg = {});
 
     // Generate G-code from a single toolpath (via NCI)
-    std::string generate(const Toolpath* tp);
-    std::string generate(const std::vector<Toolpath>& toolpaths);
+    std::string generate(const Toolpath* tp,
+                         const CoordPlane* wcsPlane = nullptr);
+    std::string generate(const std::vector<Toolpath>& toolpaths,
+                         const CoordPlane* wcsPlane = nullptr);
 
     // Generate from the toolpath manager's operation list
     // (accepts a pointer so MainWindow can pass m_toolpathMgr.get())
-    std::string generate(class ToolpathManager* mgr);
+    std::string generate(class ToolpathManager* mgr,
+                         const CoordPlane* wcsPlane = nullptr);
 
     // Write G-code to file
     bool writeNC(const std::string& filePath, const std::string& gcode);
@@ -160,7 +175,8 @@ private:
                               bool& modalG01);
 
     // Preamble / postamble code blocks
-    std::string preamble(const CuttingTool& tool);
+    std::string preamble(const CuttingTool& tool,
+                         const CoordPlane* wcsPlane = nullptr);
     std::string postamble();
 
     // Controller-specific code generators
@@ -170,6 +186,14 @@ private:
 
     // Safety-retract block: always retract Z to home before any rotary move
     std::string safetyRetractBlock() const;
+
+    // Work offset block: emit G54/G55/… based on CoordPlane::wcsOffset integer.
+    //   wcsOffset -1 or 0  → G54
+    //   wcsOffset 1        → G55
+    //   wcsOffset n        → G(54+n)
+    // When prevOffset == newOffset the block is suppressed (modal behaviour).
+    std::string workOffsetBlock(const CoordPlane* wcsPlane,
+                                int& prevGOffset) const;
 
     // Utility
     std::string coord(double val) const;

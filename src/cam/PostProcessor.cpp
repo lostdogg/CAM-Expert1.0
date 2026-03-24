@@ -27,7 +27,8 @@ std::string PostProcessor::gAddr(const std::string& /*current*/,
 }
 
 // --------------------------------------------------------------------------
-std::string PostProcessor::preamble(const CuttingTool& tool) {
+std::string PostProcessor::preamble(const CuttingTool& tool,
+                                     const CoordPlane* wcsPlane) {
     std::ostringstream oss;
 
     // Program number / header
@@ -49,6 +50,10 @@ std::string PostProcessor::preamble(const CuttingTool& tool) {
     }
     if (m_cfg.useAbsolute)
         oss << "G90\n";
+
+    // Emit work offset (G54/G55/…) based on the integer wcsOffset field
+    int dummyPrev = -99;  // force emit on first call
+    oss << workOffsetBlock(wcsPlane, dummyPrev);
 
     oss << toolChangeBlock(tool);
     return oss.str();
@@ -103,6 +108,31 @@ std::string PostProcessor::coolantBlock(CuttingParams::Coolant c, bool on) {
 // --------------------------------------------------------------------------
 std::string PostProcessor::safetyRetractBlock() const {
     return "G28 G91 Z0.\nG90\n";
+}
+
+// --------------------------------------------------------------------------
+// Work Offset block
+//
+// Emits G54, G55, G56, … based on the integer wcsOffset stored in CoordPlane:
+//   wcsOffset -1 or 0  →  G54  (first / default datum)
+//   wcsOffset  1       →  G55  (second vise)
+//   wcsOffset  2       →  G56  (third fixture)
+//   wcsOffset  n       →  G(54+n)
+//
+// The code is suppressed when the same offset is already active (modal).
+// --------------------------------------------------------------------------
+std::string PostProcessor::workOffsetBlock(const CoordPlane* wcsPlane,
+                                            int& prevGOffset) const {
+    int gNum = 54;  // default
+    if (wcsPlane)
+        gNum = wcsPlane->gCodeOffsetNumber();
+
+    if (gNum == prevGOffset) return "";  // modal: already active
+    prevGOffset = gNum;
+
+    std::ostringstream oss;
+    oss << "G" << gNum << "\n";
+    return oss.str();
 }
 
 // --------------------------------------------------------------------------
@@ -276,7 +306,8 @@ std::string PostProcessor::formatRecord(const NciRecord& rec,
 }
 
 // --------------------------------------------------------------------------
-std::string PostProcessor::generate(const Toolpath* tp) {
+std::string PostProcessor::generate(const Toolpath* tp,
+                                     const CoordPlane* wcsPlane) {
     if (!tp) return "";
     m_lastError = PostError{};
 
@@ -288,7 +319,7 @@ std::string PostProcessor::generate(const Toolpath* tp) {
         records = linearize(records, m_cfg.linearizationTol);
 
     std::ostringstream oss;
-    oss << preamble(tp->tool());
+    oss << preamble(tp->tool(), wcsPlane);
     oss << spindleBlock(tp->params().spindleRPM);
     oss << coolantBlock(tp->params().coolant, true);
 
@@ -324,20 +355,20 @@ std::string PostProcessor::generate(const Toolpath* tp) {
 }
 
 // --------------------------------------------------------------------------
-std::string PostProcessor::generate(const std::vector<Toolpath>& toolpaths) {
+std::string PostProcessor::generate(const std::vector<Toolpath>& toolpaths,
+                                     const CoordPlane* wcsPlane) {
     if (toolpaths.empty()) return "";
     m_lastError = PostError{};
 
-    auto nciText = NciFormat::serializeAll(toolpaths);
     std::ostringstream oss;
 
     // Preamble uses first tool
-    oss << preamble(toolpaths[0].tool());
+    oss << preamble(toolpaths[0].tool(), wcsPlane);
 
     NciRecord prev{};
-    bool      modalG01 = false;
-    int       lastToolId = -1;
-    int       globalIdx  = 0;
+    bool      modalG01  = false;
+    int       lastToolId= -1;
+    int       globalIdx = 0;
 
     for (const auto& tp : toolpaths) {
         // Tool change if needed
@@ -382,9 +413,10 @@ std::string PostProcessor::generate(const std::vector<Toolpath>& toolpaths) {
 }
 
 // --------------------------------------------------------------------------
-std::string PostProcessor::generate(ToolpathManager* mgr) {
+std::string PostProcessor::generate(ToolpathManager* mgr,
+                                     const CoordPlane* wcsPlane) {
     if (!mgr) return "";
-    return generate(mgr->toolpaths());
+    return generate(mgr->toolpaths(), wcsPlane);
 }
 
 // --------------------------------------------------------------------------
