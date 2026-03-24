@@ -1,4 +1,5 @@
 #include "MachineSimulation.h"
+#include "../cad/Geometry.h"
 #include <cmath>
 #include <algorithm>
 
@@ -87,10 +88,65 @@ bool MachineSimulation::checkOverTravel(const ToolpathPoint& pt,
 }
 
 // --------------------------------------------------------------------------
-bool MachineSimulation::checkCollision(const ToolpathPoint& /*pt*/,
-                                        const CuttingTool& /*tool*/) const {
-    // Production: test tool holder mesh against part/fixture meshes.
-    // Here: always return no collision (placeholder).
+// Collision-detection tunables
+static constexpr double kShankDiameterMultiplier = 0.75; // shank half-diameter = cutter_dia * this
+static constexpr double kFixtureHalfExtentXY     = 25.0; // mm – assumed fixture footprint half-size
+static constexpr double kFixtureDepth            = 100.0; // mm – assumed fixture block height
+
+// --------------------------------------------------------------------------
+bool MachineSimulation::checkCollision(const ToolpathPoint& pt,
+                                        const CuttingTool& tool) const {
+    // Approximate the tool holder as an AABB above the tool tip.
+    // Holder is modelled as a cylinder from tool tip + flute length up to
+    // tool tip + overall length, with a shank diameter = 1.5 × cutter diameter.
+    double shankRadius  = tool.diameter * kShankDiameterMultiplier;
+    double fluteLen     = tool.fluteLength;
+    double overallLen   = tool.overallLength;
+
+    // Tool tip position
+    const Geom::Vec3& tip = pt.position;
+
+    // Tool axis unit vector (default to +Z for 3-axis)
+    Geom::Vec3 axis = pt.toolAxis;
+    if (axis.length() < 0.5) axis = {0, 0, 1};
+    axis = axis.normalized();
+
+    // Holder AABB: from (tip + flute*axis) to (tip + overall*axis) +/- shankRadius
+    Geom::Vec3 holderBase = tip + axis * fluteLen;
+    Geom::Vec3 holderTop  = tip + axis * overallLen;
+
+    Geom::AABB holder;
+    holder.expand(holderBase);
+    holder.expand(holderTop);
+    // Inflate by shank radius in X and Y directions
+    holder.min.x -= shankRadius; holder.max.x += shankRadius;
+    holder.min.y -= shankRadius; holder.max.y += shankRadius;
+
+    // Check holder against machine travel limits (simplified fixture region).
+    // A simple rule: the holder must not penetrate below Z = 0 (table surface)
+    // nor extend above the Z-axis max travel.
+    for (const auto& comp : m_model.components) {
+        if (comp.name == "Z Axis") {
+            // Holder top must not exceed the spindle head clearance
+            if (holderTop.z > comp.maxTravel) return true;
+        }
+    }
+
+    // Check that the holder AABB does not overlap the assumed fixture block.
+    // Fixture occupies ±kFixtureHalfExtentXY in X/Y, depth kFixtureDepth below Z=0.
+    Geom::AABB fixture;
+    fixture.min = {-kFixtureHalfExtentXY, -kFixtureHalfExtentXY, -kFixtureDepth};
+    fixture.max = { kFixtureHalfExtentXY,  kFixtureHalfExtentXY,   0};
+
+    // Only check if the tool is cutting (not during rapid moves)
+    if (pt.motion == MotionType::Rapid || pt.motion == MotionType::Retract)
+        return false;
+
+    // Holder collides with fixture if their AABBs overlap and the holder
+    // extends below the tool tip level
+    if (Geom::aabbsOverlap(holder, fixture) && holder.min.z < tip.z)
+        return true;
+
     return false;
 }
 

@@ -21,6 +21,7 @@ struct Level {
     bool        locked  = false;
     std::string color   = "#FFFFFF";    // hex display colour
     std::string description;
+    int         entityCount = 0;        // number of geometry entities assigned
 };
 
 class LevelsManager {
@@ -37,6 +38,18 @@ public:
     void setVisible(int levelId, bool vis);
     void setLocked(int levelId, bool locked);
     void setColor(int levelId, const std::string& hex);
+
+    // Rename a level
+    void renameLevel(int levelId, const std::string& name);
+
+    // Update the description of a level
+    void setDescription(int levelId, const std::string& desc);
+
+    // Track how many entities are assigned to this level
+    void setEntityCount(int levelId, int count);
+
+    // Toggle visibility on all levels at once
+    void setAllVisible(bool vis);
 
     int                      count()  const;
     const std::vector<Level>& levels() const { return m_levels; }

@@ -44,6 +44,39 @@ void SolidsManager::clearSelection() {
     for (auto& e : m_entries) e.selected = false;
 }
 
+void SolidsManager::renameSolid(int index, const std::string& name) {
+    if (index < 0 || index >= static_cast<int>(m_entries.size())) return;
+    m_entries[static_cast<std::size_t>(index)].solid.setName(name);
+    notify();
+}
+
+void SolidsManager::setLayer(int index, const std::string& layer) {
+    if (index < 0 || index >= static_cast<int>(m_entries.size())) return;
+    m_entries[static_cast<std::size_t>(index)].layer = layer;
+    notify();
+}
+
+std::vector<int> SolidsManager::indicesOnLayer(const std::string& layer) const {
+    std::vector<int> result;
+    for (int i = 0; i < static_cast<int>(m_entries.size()); ++i)
+        if (m_entries[static_cast<std::size_t>(i)].layer == layer)
+            result.push_back(i);
+    return result;
+}
+
+Geom::AABB SolidsManager::aggregateBoundingBox() const {
+    Geom::AABB box;
+    for (const auto& e : m_entries) {
+        if (!e.visible) continue;
+        Geom::AABB sb = e.solid.boundingBox();
+        if (sb.isValid()) {
+            box.expand(sb.min);
+            box.expand(sb.max);
+        }
+    }
+    return box;
+}
+
 std::vector<int> SolidsManager::selectedIndices() const {
     std::vector<int> result;
     for (int i = 0; i < static_cast<int>(m_entries.size()); ++i)

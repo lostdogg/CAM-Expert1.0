@@ -4,7 +4,11 @@
 
 #include <windows.h>
 #include "../cad/Geometry.h"
+#include "../cam/Toolpath.h"
 #include <vector>
+
+// Forward declaration so we don't pull in ToolpathManager.h everywhere
+class ToolpathManager;
 
 // --------------------------------------------------------------------------
 // Viewport3D
@@ -34,6 +38,10 @@ public:
     void setRenderMode(RenderMode mode);
     void setView(ViewPreset preset);
 
+    // Provide a toolpath manager so the viewport can render toolpaths.
+    // The pointer is non-owning; caller is responsible for lifetime.
+    void setToolpathManager(const ToolpathManager* mgr);
+
     RenderMode renderMode() const { return m_renderMode; }
     HWND hwnd() const { return m_hwnd; }
 
@@ -47,6 +55,11 @@ private:
     void render();
     void drawGrid();
     void drawAxes();
+    void drawStock();
+    void drawToolpaths();
+
+    // Returns an RGB colour triple for a given motion type
+    static void motionColor(MotionType mt, float& r, float& g, float& b);
 
     // Camera state
     struct Camera {
@@ -60,12 +73,14 @@ private:
     // Mouse interaction
     bool  m_leftDown  = false;
     bool  m_midDown   = false;
+    bool  m_rightDown = false;
     int   m_lastMouseX = 0, m_lastMouseY = 0;
 
-    HWND       m_hwnd      = nullptr;
-    HDC        m_hDC       = nullptr;
-    HGLRC      m_hGLRC     = nullptr;
-    RenderMode m_renderMode= RenderMode::Shaded;
+    HWND                  m_hwnd      = nullptr;
+    HDC                   m_hDC       = nullptr;
+    HGLRC                 m_hGLRC     = nullptr;
+    RenderMode            m_renderMode= RenderMode::Shaded;
+    const ToolpathManager* m_toolpathMgr = nullptr;  // non-owning
 
     static constexpr const wchar_t* CLASS_NAME = L"CAMExpertViewport";
 };
