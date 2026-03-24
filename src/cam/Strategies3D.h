@@ -1,0 +1,94 @@
+#pragma once
+#ifndef STRATEGIES3D_H
+#define STRATEGIES3D_H
+
+#include "Toolpath.h"
+#include "../cad/NurbsSurface.h"
+#include "../cad/MeshData.h"
+#include <vector>
+
+// --------------------------------------------------------------------------
+// 3D Milling strategies for complex, contoured surfaces.
+//
+//  • Waterline (Z-level) roughing/finishing
+//  • Raster (parallel passes projected onto surface)
+//  • Scallop (constant step-over along surface normals)
+//  • Spiral (spiral out from a point on the surface)
+//  • ProjectSurface (drape toolpath onto a driver surface)
+//
+// All strategies include gouge-protection: the computed tool position is
+// checked against the full B-Rep / mesh to ensure no intersection.
+// --------------------------------------------------------------------------
+
+class Strategies3D {
+public:
+    struct WaterlineParams {
+        double topZ     = 0.0;     // start Z level (mm)
+        double bottomZ  = -50.0;   // end Z level (mm)
+        double zStep    = 1.0;     // Z increment between passes (mm)
+        double stepOver = 0.5;     // fraction of tool Ø between offset passes at same Z
+        double stockAllowance = 0.25;
+    };
+
+    struct RasterParams {
+        double stepOver     = 0.5;   // fraction of tool Ø
+        double angle        = 0.0;   // raster angle in degrees (0 = X-aligned)
+        double stockAllowance = 0.0;
+    };
+
+    struct ScallopParams {
+        double stepOver     = 0.5;   // constant scallop height (mm)
+        double stockAllowance = 0.0;
+    };
+
+    struct SpiralParams {
+        Geom::Vec2 centre;
+        double maxRadius    = 50.0;   // mm
+        double pitchPerRev  = 0.5;    // step-over per revolution (mm)
+        double stockAllowance = 0.0;
+    };
+
+    // Generate waterline (Z-level) toolpath on a NURBS surface
+    static Toolpath waterline(const NurbsSurface& surf,
+                               const WaterlineParams& p,
+                               const CuttingTool& tool,
+                               const CuttingParams& cuts);
+
+    // Raster on a mesh model
+    static Toolpath raster(const MeshData& mesh,
+                            const RasterParams& p,
+                            const CuttingTool& tool,
+                            const CuttingParams& cuts);
+
+    // Scallop on a NURBS surface
+    static Toolpath scallop(const NurbsSurface& surf,
+                             const ScallopParams& p,
+                             const CuttingTool& tool,
+                             const CuttingParams& cuts);
+
+    // Spiral on a NURBS surface
+    static Toolpath spiral(const NurbsSurface& surf,
+                            const SpiralParams& p,
+                            const CuttingTool& tool,
+                            const CuttingParams& cuts);
+
+private:
+    // Project a 2-D point (x,y) down onto the mesh surface (ray-cast)
+    // Returns true and sets z if hit; false if no intersection.
+    static bool projectOntoMesh(const MeshData& mesh,
+                                  double x, double y,
+                                  double& z);
+
+    // Ray–triangle intersection (Möller–Trumbore)
+    static bool rayTriIntersect(const Geom::Ray& ray,
+                                  const Geom::Triangle& tri,
+                                  double& t);
+
+    // Gouge-check: ensure tool tip at 'pos' with axis 'axis' doesn't intersect mesh
+    static bool isGouge(const Geom::Vec3& tipPos,
+                         const Geom::Vec3& toolAxis,
+                         double toolRadius,
+                         const MeshData& mesh);
+};
+
+#endif // STRATEGIES3D_H

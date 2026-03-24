@@ -1,0 +1,36 @@
+// CAMExpert.rc – Windows resource file
+#include "resource.h"
+#include <windows.h>
+
+// Application manifest (enables visual styles / Common Controls v6)
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "CAMExpert.exe.manifest"
+
+// Version information
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION    1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+FILEFLAGS      0
+FILEOS         VOS_NT_WINDOWS32
+FILETYPE       VFT_APP
+FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "CAM-Expert Project"
+            VALUE "FileDescription",  "CAM-Expert 1.0 - Computer-Aided Manufacturing"
+            VALUE "FileVersion",      "1.0.0.0"
+            VALUE "InternalName",     "CAMExpert"
+            VALUE "LegalCopyright",   "\0xA9 2024 CAM-Expert Project"
+            VALUE "OriginalFilename", "CAMExpert.exe"
+            VALUE "ProductName",      "CAM-Expert"
+            VALUE "ProductVersion",   "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 0x04B0
+    END
+END
