@@ -62,6 +62,7 @@ private:
     void buildModelPrepTab();
     void buildMachineTab();
     void buildViewTab();
+    void buildCopilotTab();
 
     void addTab(RibbonTab tab);
     void renderTab(int tabIndex);

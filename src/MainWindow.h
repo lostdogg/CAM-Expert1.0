@@ -13,6 +13,8 @@ class ToolpathManager;
 class SolidsManager;
 class LevelsManager;
 class PlanesManager;
+class CopilotPanel;
+class CopilotEngine;
 
 // IDs for child panels / controls
 constexpr int IDC_RIBBON          = 100;
@@ -20,6 +22,7 @@ constexpr int IDC_VIEWPORT        = 101;
 constexpr int IDC_MANAGERS_PANEL  = 102;
 constexpr int IDC_STATUS_BAR      = 103;
 constexpr int IDC_SELECTION_BAR   = 104;
+constexpr int IDC_COPILOT_PANEL   = 105;
 
 // Menu command IDs
 constexpr int IDM_FILE_NEW        = 1001;
@@ -82,6 +85,7 @@ constexpr int IDM_PREP_DRAFT      = 4305;
 constexpr int IDM_PREP_SPLIT      = 4306;
 
 constexpr int IDM_HELP_ABOUT      = 9001;
+constexpr int IDM_COPILOT_TOGGLE  = 9002;
 
 // --------------------------------------------------------------------------
 // MainWindow – the top-level application frame.
@@ -125,6 +129,7 @@ private:
     void runVerify();
     void runBackplot();
     void runMachineSim();
+    void toggleCopilotPanel();
 
     // Window/controls
     HWND                              m_hwnd          = nullptr;
@@ -141,11 +146,17 @@ private:
     std::unique_ptr<LevelsManager>    m_levelsMgr;
     std::unique_ptr<PlanesManager>    m_planesMgr;
 
+    // Copilot
+    std::unique_ptr<CopilotPanel>     m_copilotPanel;
+    std::unique_ptr<CopilotEngine>    m_copilotEngine;
+    bool                              m_copilotVisible = false;
+
     static constexpr const wchar_t* CLASS_NAME        = L"CAMExpertMainWnd";
     static constexpr int MANAGERS_PANEL_WIDTH          = 280;
     static constexpr int RIBBON_HEIGHT                 = 100;
     static constexpr int STATUS_BAR_HEIGHT             = 22;
     static constexpr int SELECTION_BAR_WIDTH           = 40;  // wider for buttons
+    static constexpr int COPILOT_PANEL_WIDTH           = 320; // collapsible Copilot panel
 };
 
 #endif // MAINWINDOW_H
