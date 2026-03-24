@@ -25,6 +25,19 @@ class ToolpathManager;
 //   • Program numbering   (O-number / program name)
 //   • Safety codes        (cancel cycles, reset modal state)
 //   • Sub-program support
+//
+// Advanced features:
+//   • Axis over-travel detection – checks every coordinate against the
+//     machine's physical travel limits before writing any G-code.
+//     Formula: X_machine = X_part + WorkOffset_X
+//     If X_machine > X_limit  → Fatal Error, posting aborted.
+//   • Rotary singularity handling – detects when the tool vector V(0,0,1)
+//     approaches the Z-axis singularity and applies "Pre-Roll" logic to
+//     choose a preferred rotary direction, avoiding mechanical stall.
+//   • Look-ahead / linearization tolerance – merges near-collinear tiny
+//     segments into one longer line, keeping the controller buffer full.
+//   • Conditional logic – safety retracts, tool-change sequences, and
+//     custom variable / M-code injection.
 // --------------------------------------------------------------------------
 
 enum class ControllerType {
@@ -61,8 +74,39 @@ struct PostConfig {
     // Feed / speed format
     bool   feedInMMMin     = true;  // true=mm/min (G94), false=mm/rev (G95)
     bool   constantSurfaceSpeed = false;  // G96 (turning)
+
+    // ---- Machine limits (for over-travel detection) ----
+    double xMin = -500, xMax = 500;
+    double yMin = -400, yMax = 400;
+    double zMin = -300, zMax =   0;
+
+    // Work offset applied before limit check: X_machine = X_part + workOffset
+    double workOffsetX = 0, workOffsetY = 0, workOffsetZ = 0;
+
+    // ---- Look-ahead / linearization ----
+    bool   enableLinearizationFilter = false; // merge near-collinear segments
+    double linearizationTol          = 0.0025; // mm chord-height tolerance
+
+    // ---- Singularity handling ----
+    bool   enableSingularityHandling = true;
+    double singularityAngleDeg       = 2.0;   // threshold: tool ≈ vertical
+    double preRollOffsetDeg          = 5.0;   // tilt applied before singularity
 };
 
+// --------------------------------------------------------------------------
+// PostError – issued when a fatal condition is detected
+// --------------------------------------------------------------------------
+struct PostError {
+    enum class Type { None, OverTravel, Singularity, KinematicLimit };
+    Type        type      = Type::None;
+    int         recordIdx = -1;       // which NCI record triggered the error
+    std::string message;
+    bool isFatal() const { return type != Type::None; }
+};
+
+// --------------------------------------------------------------------------
+// PostProcessor
+// --------------------------------------------------------------------------
 class PostProcessor {
 public:
     explicit PostProcessor(PostConfig cfg = {});
@@ -81,6 +125,34 @@ public:
     const PostConfig& config() const { return m_cfg; }
     void setConfig(const PostConfig& c) { m_cfg = c; }
 
+    // Last error from generate()
+    const PostError& lastError() const { return m_lastError; }
+    bool             hasError()  const { return m_lastError.isFatal(); }
+
+    // ---- Safety checks ----
+
+    // Check whether a coordinate exceeds machine travel limits.
+    // Returns true if an over-travel condition is found; fills 'err'.
+    bool checkOverTravel(double x, double y, double z,
+                         int recordIdx, PostError& err) const;
+
+    // Detect rotary singularity: tool axis vector nearly aligned with Z.
+    // Returns true if the axis is within singularityAngleDeg of (0,0,1).
+    bool isSingularity(const Geom::Vec3& toolAxis) const;
+
+    // Apply pre-roll to avoid singularity: slightly perturb the tool axis
+    // away from Z by preRollOffsetDeg in the X direction.
+    static Geom::Vec3 applyPreRoll(const Geom::Vec3& toolAxis,
+                                    double preRollDeg);
+
+    // ---- Linearization filter ----
+
+    // Merge near-collinear NCI records into longer single segments.
+    // Segments are merged if their deviation from a straight line is
+    // within linearizationTol.
+    static std::vector<NciRecord>
+        linearize(const std::vector<NciRecord>& records, double tol);
+
 private:
     // Format a single NCI record as G-code
     std::string formatRecord(const NciRecord& rec,
@@ -96,12 +168,17 @@ private:
     std::string spindleBlock(double rpm, bool cw = true);
     std::string coolantBlock(CuttingParams::Coolant c, bool on);
 
+    // Safety-retract block: always retract Z to home before any rotary move
+    std::string safetyRetractBlock() const;
+
     // Utility
     std::string coord(double val) const;
     std::string gAddr(const std::string& code, bool& modal,
                        const std::string& newCode) const;
 
     PostConfig m_cfg;
+    PostError  m_lastError;
 };
 
 #endif // POST_PROCESSOR_H
+
