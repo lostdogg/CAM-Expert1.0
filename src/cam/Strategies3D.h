@@ -37,7 +37,7 @@ public:
     };
 
     struct ScallopParams {
-        double stepOver     = 0.5;   // constant scallop height (mm)
+        double stepOver     = 0.5;   // lateral distance between passes (mm)
         double stockAllowance = 0.0;
     };
 
@@ -71,6 +71,24 @@ public:
                             const SpiralParams& p,
                             const CuttingTool& tool,
                             const CuttingParams& cuts);
+
+    // -----------------------------------------------------------------------
+    // Scallop height formula
+    //
+    // When a ball-end (or bull-nose) tool steps laterally by Sₒ mm across a
+    // surface it leaves a small cusp of uncut material known as the "scallop".
+    // Its height h controls the surface finish Ra:
+    //
+    //   h = R - √( R² - (Sₒ/2)² )
+    //
+    // where R is the tool radius and Sₒ is the stepover distance.
+    // A smaller Sₒ → smaller h → smoother finish (higher Ra number means rougher).
+    //
+    // Conversely, given a target scallop height h, the maximum allowed stepover is:
+    //   Sₒ = 2·√( R·(2h - h²/R) )   ≈   2·√(2·R·h)   for h << R
+    // -----------------------------------------------------------------------
+    static double scallopHeight(double toolRadius, double stepOver);
+    static double stepOverFromScallop(double toolRadius, double targetScallopHeight);
 
 private:
     // Project a 2-D point (x,y) down onto the mesh surface (ray-cast)

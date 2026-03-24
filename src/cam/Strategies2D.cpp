@@ -5,14 +5,21 @@
 static constexpr double PI2D = 3.14159265358979323846;
 
 // --------------------------------------------------------------------------
-// Add one planar contour pass
+// Add one planar contour pass with optional lead-in and lead-out arcs.
+//
+// Lead-In:  A tangential quarter-circle arc that smoothly brings the tool
+//           onto the profile, avoiding the "shock" of a straight plunge.
+//
+// Lead-Out: A matching tangential quarter-circle arc that lifts the tool
+//           away from the profile at exit, preventing a dwell mark on the
+//           finished surface.
 // --------------------------------------------------------------------------
 void Strategies2D::addContourPass(Toolpath& tp,
                                    const std::vector<Geom::Vec2>& profile,
-                                   double z, double leadInR) {
+                                   double z, double leadInR, double leadOutR) {
     if (profile.empty()) return;
 
-    // Lead-in arc (quarter circle tangent to first edge)
+    // ---- Lead-In arc (quarter circle, tangent to first edge) ----
     if (profile.size() >= 2 && leadInR > 0) {
         Geom::Vec2 dir = (profile[1] - profile[0]).normalized();
         Geom::Vec2 perp{dir.y, -dir.x};
@@ -30,7 +37,7 @@ void Strategies2D::addContourPass(Toolpath& tp,
         }
     }
 
-    // Profile points
+    // ---- Profile points (The Cut) ----
     for (const auto& p : profile) {
         ToolpathPoint pt;
         pt.position = {p.x, p.y, z};
@@ -46,6 +53,30 @@ void Strategies2D::addContourPass(Toolpath& tp,
         close.toolAxis = {0, 0, 1};
         close.motion   = MotionType::Linear;
         tp.addPoint(close);
+    }
+
+    // ---- Lead-Out arc (quarter circle, tangent to last edge) ----
+    // Mirrors the lead-in geometry at the exit point so the tool departs
+    // smoothly rather than retracting straight up through the finish surface.
+    // The perpendicular direction is reversed relative to lead-in because the
+    // tool is now exiting (departing away from the material), so the arc
+    // curves outward on the opposite side of the exit edge.
+    if (profile.size() >= 2 && leadOutR > 0) {
+        std::size_t n = profile.size();
+        Geom::Vec2 exitDir = (profile[n-1] - profile[n-2]).normalized();
+        Geom::Vec2 exitPerp{-exitDir.y, exitDir.x};
+        Geom::Vec2 arcEnd{profile[n-1].x + exitPerp.x * leadOutR,
+                          profile[n-1].y + exitPerp.y * leadOutR};
+        int arcPts = 8;
+        for (int i = 0; i <= arcPts; ++i) {
+            double a = PI2D / 2.0 * i / arcPts;  // 0 → π/2
+            ToolpathPoint pt;
+            pt.position = {arcEnd.x - leadOutR * std::cos(a),
+                           arcEnd.y + leadOutR * std::sin(a), z};
+            pt.toolAxis = {0, 0, 1};
+            pt.motion   = MotionType::ArcCW;
+            tp.addPoint(pt);
+        }
     }
 }
 
@@ -77,7 +108,7 @@ Toolpath Strategies2D::contour2D(const std::vector<Geom::Vec2>& profile,
         plunge.motion     = MotionType::PlungeFeed;
         tp.addPoint(plunge);
 
-        addContourPass(tp, profile, z, p.leadInRadius);
+        addContourPass(tp, profile, z, p.leadInRadius, p.leadOutRadius);
 
         // Retract
         ToolpathPoint ret;

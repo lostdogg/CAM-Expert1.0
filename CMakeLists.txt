@@ -35,6 +35,8 @@ set(SOURCES
     src/cam/NciFormat.cpp
     src/cam/MaterialLibrary.cpp
     src/cam/MillTurn.cpp
+    src/cam/SwissMachining.cpp
+    src/cam/CloudToolLibrary.cpp
     src/managers/ToolpathManager.cpp
     src/managers/SolidsManager.cpp
     src/managers/LevelsManager.cpp
@@ -68,6 +70,8 @@ set(HEADERS
     src/cam/NciFormat.h
     src/cam/MaterialLibrary.h
     src/cam/MillTurn.h
+    src/cam/SwissMachining.h
+    src/cam/CloudToolLibrary.h
     src/managers/ToolpathManager.h
     src/managers/SolidsManager.h
     src/managers/LevelsManager.h
