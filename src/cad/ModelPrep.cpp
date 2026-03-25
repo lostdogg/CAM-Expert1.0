@@ -211,8 +211,9 @@ ModelPrep::analyseModel(const BRep::Solid& solid) {
 
     // --- Check 2: Duplicate vertex positions (gap tolerance 0.001 mm) ---
     static constexpr double kDupTol = 0.001;
-    for (std::size_t i = 0; i < verts.size(); ++i) {
-        for (std::size_t j = i + 1; j < verts.size(); ++j) {
+    bool foundDuplicate = false;
+    for (std::size_t i = 0; i < verts.size() && !foundDuplicate; ++i) {
+        for (std::size_t j = i + 1; j < verts.size() && !foundDuplicate; ++j) {
             auto diff = verts[i].point - verts[j].point;
             if (diff.length() < kDupTol && diff.length() > 0) {
                 HealIssue h;
@@ -222,13 +223,11 @@ ModelPrep::analyseModel(const BRep::Solid& solid) {
                               + " – consider snapping (healSurfaces)";
                 h.faceId = -1;
                 issues.push_back(h);
-                // Stop after first duplicate to avoid O(n^2) output explosion
-                goto checkEdges;
+                foundDuplicate = true; // report only the first pair to avoid O(n²) output
             }
         }
     }
 
-checkEdges:
     // --- Check 3: Degenerate edges (zero-length) ---
     for (const auto& e : edges) {
         if (e.startVertexId < 0 || e.endVertexId < 0) continue;

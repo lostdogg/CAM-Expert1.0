@@ -620,12 +620,9 @@ void MainWindow::runVerify() {
     VerifyResult result = v.run(m_toolpathMgr.get());
 
     // Feed the result to the Copilot engine so "Verify" button uses real data
-    if (m_copilotEngine) {
-        // Persist the result via a static so the pointer remains valid
-        static VerifyResult s_lastVerify;
-        s_lastVerify = result;
-        m_copilotEngine->setLastVerifyResult(&s_lastVerify);
-    }
+    m_lastVerifyResult = result;
+    if (m_copilotEngine)
+        m_copilotEngine->setLastVerifyResult(&m_lastVerifyResult);
 
     std::wstring msg = L"Verify complete.";
     if (result.hasGouge) {

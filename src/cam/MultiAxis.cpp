@@ -2,7 +2,7 @@
 #include <cmath>
 #include <algorithm>
 
-static constexpr double PIMA = 3.14159265358979323846;
+static constexpr double PIMA = 3.14159265358979323846; // π (pi) – avoids M_PI portability concerns
 
 // --------------------------------------------------------------------------
 MultiAxis::MultiAxis(MultiAxisParams params)
