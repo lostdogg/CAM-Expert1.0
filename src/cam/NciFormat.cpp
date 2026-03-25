@@ -97,6 +97,33 @@ std::vector<NciRecord> NciFormat::parse(const std::string& nciText) {
             continue;
         }
 
+        // Arc annotation line: "ARC, cx, cy, cz, r"
+        if (line.find("ARC,") != std::string::npos) {
+            std::istringstream ls(line.substr(line.find(',') + 1));
+            char comma;
+            double cx, cy, cz, r;
+            if (ls >> cx >> comma >> cy >> comma >> cz >> comma >> r) {
+                // Store arc centre in i/j/k of the most recent record
+                if (!records.empty()) {
+                    records.back().i = cx;
+                    records.back().j = cy;
+                    records.back().k = cz;
+                }
+            }
+            continue;
+        }
+
+        // 5-axis tool axis line: "14" followed by coordinate line
+        if (line == "14") {
+            std::string axLine;
+            if (std::getline(ss, axLine)) {
+                std::istringstream ls(axLine);
+                char comma;
+                ls >> current.i >> comma >> current.j >> comma >> current.k;
+            }
+            continue;
+        }
+
         std::istringstream ls(line);
         int code;
         if (!(ls >> code)) continue;
@@ -104,7 +131,6 @@ std::vector<NciRecord> NciFormat::parse(const std::string& nciText) {
         current.code    = code;
         current.isRapid = (code == 0);
 
-        // Next line should be X,Y,Z or end marker
         if (code == 99) { break; }
         if (code == 0 || code == 1 || code == 2 || code == 3) {
             if (!std::getline(ss, line)) break;

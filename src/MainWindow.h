@@ -4,6 +4,7 @@
 
 #include <windows.h>
 #include <memory>
+#include "simulation/Verify.h"
 
 // Forward declarations
 class RibbonUI;
@@ -150,6 +151,7 @@ private:
     std::unique_ptr<CopilotPanel>     m_copilotPanel;
     std::unique_ptr<CopilotEngine>    m_copilotEngine;
     bool                              m_copilotVisible = false;
+    VerifyResult                      m_lastVerifyResult; // persists for Copilot engine
 
     static constexpr const wchar_t* CLASS_NAME        = L"CAMExpertMainWnd";
     static constexpr int MANAGERS_PANEL_WIDTH          = 280;

@@ -112,15 +112,37 @@ Toolpath Strategies3D::waterline(const NurbsSurface& surf,
 
         if (contour.empty()) continue;
 
-        // Sort by angle around centroid for a closed contour
-        Geom::Vec3 cen{};
-        for (const auto& q : contour) cen = cen + q;
-        cen = cen * (1.0 / contour.size());
-        std::sort(contour.begin(), contour.end(),
-            [&cen](const Geom::Vec3& a, const Geom::Vec3& b) {
-                return std::atan2(a.y - cen.y, a.x - cen.x)
-                     < std::atan2(b.y - cen.y, b.x - cen.x);
-            });
+        // Sort by nearest-neighbour chain rather than pure angular sort.
+        // Angular sort fails for U-shaped or concave contours; nearest-
+        // neighbour chains produce a connected path along the level set.
+        {
+            std::vector<Geom::Vec3> sorted;
+            sorted.reserve(contour.size());
+            std::vector<bool> used(contour.size(), false);
+
+            // Start from the point with the smallest X (deterministic start)
+            std::size_t startIdx = 0;
+            for (std::size_t k = 1; k < contour.size(); ++k)
+                if (contour[k].x < contour[startIdx].x) startIdx = k;
+
+            sorted.push_back(contour[startIdx]);
+            used[startIdx] = true;
+
+            while (sorted.size() < contour.size()) {
+                const Geom::Vec3& last = sorted.back();
+                double bestDist = 1e30;
+                std::size_t bestIdx = 0;
+                for (std::size_t k = 0; k < contour.size(); ++k) {
+                    if (used[k]) continue;
+                    auto d = contour[k] - last;
+                    double dist = d.x*d.x + d.y*d.y + d.z*d.z;
+                    if (dist < bestDist) { bestDist = dist; bestIdx = k; }
+                }
+                sorted.push_back(contour[bestIdx]);
+                used[bestIdx] = true;
+            }
+            contour = sorted;
+        }
 
         // Rapid to start of level
         if (tp.points().empty()) {

@@ -268,12 +268,16 @@ void CopilotPanel::onDismiss() {
 void CopilotPanel::onOptimize() {
     if (!m_engine) return;
     appendOutput("\n[Copilot] Analysing cycle time…\n");
+    // analyseCycleTime fires the SuggestionCallback (registered in
+    // setCopilotEngine) which appends the result via appendOutput.
     m_engine->analyseCycleTime();
 }
 
 void CopilotPanel::onVerify() {
     if (!m_engine) return;
     appendOutput("\n[Copilot] Running simulation analysis…\n");
+    // analyseVerifyResult fires the SuggestionCallback.  The engine
+    // prefers the stored m_lastVerify over an empty result.
     m_engine->analyseVerifyResult(VerifyResult{});
 }
 

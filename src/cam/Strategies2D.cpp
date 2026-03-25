@@ -124,34 +124,87 @@ Toolpath Strategies2D::contour2D(const std::vector<Geom::Vec2>& profile,
 }
 
 // --------------------------------------------------------------------------
+// concentricOffsets – generate inward-offset rings for pocket milling.
+//
+// Algorithm: at each vertex compute the inward bisector direction from its
+// two adjacent edges, then offset inward by stepOver.  This preserves corner
+// angles much better than a simple centroid-shrink (the old approach
+// produced degenerate shapes for non-convex pockets).  The polygon is
+// considered exhausted when any vertex can no longer move by stepOver
+// without crossing the centroid.
+// --------------------------------------------------------------------------
 std::vector<std::vector<Geom::Vec2>>
 Strategies2D::concentricOffsets(const std::vector<Geom::Vec2>& boundary,
                                   double stepOver) {
+    if (boundary.size() < 3 || stepOver <= 0)
+        return {};
+
     std::vector<std::vector<Geom::Vec2>> offsets;
     offsets.push_back(boundary);
 
-    // Simple inward shrink: move each vertex toward the centroid
-    // Production uses Clipper-lib offset polygons
-    Geom::Vec2 centroid{};
-    for (const auto& p : boundary) { centroid.x += p.x; centroid.y += p.y; }
-    centroid.x /= boundary.size();
-    centroid.y /= boundary.size();
-
     std::vector<Geom::Vec2> current = boundary;
-    for (int iter = 0; iter < 50; ++iter) {
+
+    for (int iter = 0; iter < 200; ++iter) {
+        const std::size_t N = current.size();
+        if (N < 3) break;
+
         std::vector<Geom::Vec2> inner;
-        inner.reserve(current.size());
-        for (const auto& p : current) {
-            Geom::Vec2 dir{centroid.x - p.x, centroid.y - p.y};
-            double d = dir.length();
-            if (d < stepOver * 0.5) goto done;
-            inner.push_back({p.x + dir.x / d * stepOver,
-                             p.y + dir.y / d * stepOver});
+        inner.reserve(N);
+        bool tooSmall = false;
+
+        // Compute polygon centroid for this pass
+        Geom::Vec2 cen{};
+        for (const auto& p : current) { cen.x += p.x; cen.y += p.y; }
+        cen.x /= static_cast<double>(N);
+        cen.y /= static_cast<double>(N);
+
+        for (std::size_t i = 0; i < N; ++i) {
+            const Geom::Vec2& prev = current[(i + N - 1) % N];
+            const Geom::Vec2& cur  = current[i];
+            const Geom::Vec2& next = current[(i + 1) % N];
+
+            // Edge directions
+            Geom::Vec2 d1 = (cur  - prev).normalized();
+            Geom::Vec2 d2 = (next - cur ).normalized();
+
+            // Inward normals of each edge (perpendicular, pointing inward)
+            Geom::Vec2 n1{-d1.y,  d1.x};
+            Geom::Vec2 n2{-d2.y,  d2.x};
+
+            // Bisector: average inward normal
+            Geom::Vec2 bis{(n1.x + n2.x) * 0.5, (n1.y + n2.y) * 0.5};
+            double bisLen = bis.length();
+
+            if (bisLen < 1e-9) {
+                // Degenerate corner – use centroid direction as fallback
+                Geom::Vec2 fb{cen.x - cur.x, cen.y - cur.y};
+                double fl = fb.length();
+                if (fl < stepOver * 0.5) { tooSmall = true; break; }
+                bis    = {fb.x / fl, fb.y / fl};
+                bisLen = 1.0;
+            }
+
+            // Scale so the actual offset distance = stepOver; cap for acute angles
+            double scale = std::min(1.0 / bisLen, 4.0);
+            Geom::Vec2 offset{cur.x + bis.x * scale * stepOver,
+                              cur.y + bis.y * scale * stepOver};
+
+            // Check: offset vertex must remain on the centroid side of cur
+            Geom::Vec2 toCen{cen.x - cur.x, cen.y - cur.y};
+            Geom::Vec2 toOff{offset.x - cur.x, offset.y - cur.y};
+            if (toCen.dot(toOff) < 0 || toCen.length() < stepOver * 0.5) {
+                tooSmall = true;
+                break;
+            }
+
+            inner.push_back(offset);
         }
+
+        if (tooSmall || inner.size() < 3) break;
         offsets.push_back(inner);
         current = inner;
     }
-done:
+
     return offsets;
 }
 

@@ -12,6 +12,8 @@
 #include "simulation/Verify.h"
 #include "simulation/MachineSimulation.h"
 #include "cam/PostProcessor.h"
+#include "cad/FileImporter.h"
+#include "cad/FeatureRecognition.h"
 #include "copilot/CopilotEngine.h"
 #include <commctrl.h>
 #include <commdlg.h>
@@ -484,12 +486,68 @@ void MainWindow::fileImport() {
     ofn.nMaxFile    = MAX_PATH;
     ofn.Flags       = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
 
-    if (GetOpenFileNameW(&ofn)) {
-        std::wstring msg = std::wstring(L"Importing: ") + szFile;
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-            reinterpret_cast<LPARAM>(msg.c_str()));
-        // FileImporter::import(szFile) would be invoked here to load geometry
+    if (!GetOpenFileNameW(&ofn)) return;
+
+    // Convert wide path to UTF-8 for FileImporter
+    int nbytes = WideCharToMultiByte(CP_UTF8, 0, szFile, -1,
+                                     nullptr, 0, nullptr, nullptr);
+    std::string filePath(static_cast<std::size_t>(nbytes), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, szFile, -1,
+                        filePath.data(), nbytes, nullptr, nullptr);
+    if (!filePath.empty() && filePath.back() == '\0')
+        filePath.pop_back();
+
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>((std::wstring(L"Importing: ") + szFile).c_str()));
+
+    // Invoke the FileImporter
+    FileImporter importer;
+    ImportResult result = importer.import(filePath);
+
+    std::wstring statusMsg;
+
+    // Handle imported result
+    if (std::holds_alternative<BRep::Solid>(result)) {
+        BRep::Solid& solid = std::get<BRep::Solid>(result);
+        if (m_solidsMgr) m_solidsMgr->addSolid(solid);
+
+        // Run automatic feature recognition
+        if (m_copilotEngine) {
+            FeatureRecognition fr;
+            auto features = fr.recognise(solid);
+            m_copilotEngine->setRecognisedFeatures(features);
+        }
+
+        std::string name = solid.name().empty() ? "Solid" : solid.name();
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, name.c_str(), -1, nullptr, 0);
+        std::wstring wname(static_cast<std::size_t>(wlen > 0 ? wlen - 1 : 0), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, name.c_str(), -1, wname.data(), wlen);
+
+        statusMsg = L"Imported solid: " + wname
+                  + L"  (" + std::to_wstring(solid.faces().size()) + L" faces)";
+
+    } else if (std::holds_alternative<MeshData>(result)) {
+        const MeshData& mesh = std::get<MeshData>(result);
+        statusMsg = L"Imported mesh: "
+                  + std::to_wstring(mesh.triCount()) + L" triangles";
+    } else {
+        // Import failed or returned unknown type
+        const std::string& err = importer.lastError();
+        if (!err.empty()) {
+            int wlen = MultiByteToWideChar(CP_UTF8, 0, err.c_str(), -1, nullptr, 0);
+            std::wstring werr(static_cast<std::size_t>(wlen > 0 ? wlen - 1 : 0), L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, err.c_str(), -1, werr.data(), wlen);
+            statusMsg = L"Import failed: " + werr;
+        } else {
+            statusMsg = L"Import failed: unknown error.";
+        }
     }
+
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(statusMsg.c_str()));
+
+    // Refresh the viewport
+    if (m_viewport) m_viewport->redraw();
 }
 
 // --------------------------------------------------------------------------
@@ -497,23 +555,77 @@ void MainWindow::postProcess() {
     PostProcessor pp;
     const CoordPlane* wcsPlane = m_planesMgr ? m_planesMgr->wcsPlane() : nullptr;
     auto gcode = pp.generate(m_toolpathMgr.get(), wcsPlane);
-    if (!gcode.empty()) {
-        MessageBoxW(m_hwnd,
-            L"Post-processing complete. NC file generated.",
-            L"Post-Processor", MB_OK | MB_ICONINFORMATION);
-    } else {
+
+    if (gcode.empty()) {
         SendMessage(m_hStatusBar, SB_SETTEXT, 0,
             reinterpret_cast<LPARAM>(L"Post-Processor: no toolpaths to process."));
+        return;
+    }
+
+    if (pp.hasError()) {
+        const std::string& errStr = pp.lastError().message;
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, errStr.c_str(), -1, nullptr, 0);
+        std::wstring werr(static_cast<std::size_t>(wlen > 0 ? wlen - 1 : 0), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, errStr.c_str(), -1, werr.data(), wlen);
+        MessageBoxW(m_hwnd, werr.c_str(), L"Post-Processor Error", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // Prompt for save path
+    wchar_t szFile[MAX_PATH] = {};
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize    = sizeof(ofn);
+    ofn.hwndOwner      = m_hwnd;
+    ofn.lpstrFilter    =
+        L"NC Files (*.nc;*.tap;*.cnc;*.mpf)\0*.nc;*.tap;*.cnc;*.mpf\0"
+        L"Text Files (*.txt)\0*.txt\0"
+        L"All Files (*.*)\0*.*\0";
+    ofn.lpstrFile      = szFile;
+    ofn.nMaxFile       = MAX_PATH;
+    ofn.lpstrDefExt    = L"nc";
+    ofn.Flags          = OFN_OVERWRITEPROMPT;
+
+    if (GetSaveFileNameW(&ofn)) {
+        // Convert path to UTF-8 and write the file
+        int nbytes = WideCharToMultiByte(CP_UTF8, 0, szFile, -1, nullptr, 0, nullptr, nullptr);
+        std::string ncPath(static_cast<std::size_t>(nbytes), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, szFile, -1, ncPath.data(), nbytes, nullptr, nullptr);
+        if (!ncPath.empty() && ncPath.back() == '\0') ncPath.pop_back();
+
+        if (pp.writeNC(ncPath, gcode)) {
+            std::wstring msg = std::wstring(L"NC file saved: ") + szFile;
+            SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+                reinterpret_cast<LPARAM>(msg.c_str()));
+        } else {
+            MessageBoxW(m_hwnd, L"Failed to write the NC file.",
+                        L"Post-Processor", MB_OK | MB_ICONERROR);
+        }
+    } else {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Post-processing complete."));
     }
 }
 
 // --------------------------------------------------------------------------
 void MainWindow::runVerify() {
     Verify v;
+
+    // Show progress in status bar
+    v.setProgressCallback([this](int pct) {
+        std::wstring msg = L"Verify: " + std::to_wstring(pct) + L"%";
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(msg.c_str()));
+    });
+
     VerifyResult result = v.run(m_toolpathMgr.get());
+
+    // Feed the result to the Copilot engine so "Verify" button uses real data
+    m_lastVerifyResult = result;
+    if (m_copilotEngine)
+        m_copilotEngine->setLastVerifyResult(&m_lastVerifyResult);
+
     std::wstring msg = L"Verify complete.";
     if (result.hasGouge) {
-        // Format max gouge depth to 2 decimal places.
         char depthBuf[32];
         int written = std::snprintf(depthBuf, sizeof(depthBuf),
                                     "%.2f", result.maxGougeDepth);
@@ -524,6 +636,9 @@ void MainWindow::runVerify() {
             + depthStr + L" mm).";
     } else {
         msg += L"  No gouges detected.";
+    }
+    if (result.hasUndercut) {
+        msg += L"  UNDERCUT: " + std::to_wstring(result.undercutCount) + L" cell(s).";
     }
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
         reinterpret_cast<LPARAM>(msg.c_str()));

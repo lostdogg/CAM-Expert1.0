@@ -39,6 +39,8 @@ struct MachineModel {
     static MachineModel threeAxis();
     static MachineModel fourAxisHorizontal();
     static MachineModel fiveAxisHeadTable();
+    static MachineModel fiveAxisTableTable();   // e.g. Fanuc 30iA tilting rotary table
+    static MachineModel fiveAxisHeadHead();     // e.g. Hermle C600 dual-head
 };
 
 struct CollisionResult {

@@ -323,8 +323,16 @@ void CopilotEngine::rejectLastSuggestion() {
 
 // --------------------------------------------------------------------------
 // analyseVerifyResult – Predictive Debugging
+// If m_lastVerify is available (set after a real Verify run) it takes
+// precedence over the passed-in result when the passed result is empty.
 // --------------------------------------------------------------------------
 CopilotResponse CopilotEngine::analyseVerifyResult(const VerifyResult& result) {
+    // Prefer stored result from the last real Verify run
+    if (m_lastVerify &&
+        !result.hasGouge && !result.hasUndercut &&
+        result.gougeCount == 0 && result.undercutCount == 0) {
+        return buildGougeSuggestion(*m_lastVerify);
+    }
     return buildGougeSuggestion(result);
 }
 

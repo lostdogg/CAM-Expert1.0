@@ -53,6 +53,38 @@ MachineModel MachineModel::fiveAxisHeadTable() {
     return m;
 }
 
+MachineModel MachineModel::fiveAxisTableTable() {
+    MachineModel m;
+    m.name = "5-Axis Table/Table (tilting rotary table)";
+    m.kinematics.type     = MachineKinematics::Type::Table_Table;
+    m.kinematics.aAxisMin =  -30; m.kinematics.aAxisMax = 120;  // tilt axis (A)
+    m.kinematics.bAxisMin = -360; m.kinematics.bAxisMax = 360;  // rotation axis (C→stored as B)
+
+    MachineComponent x{"X Axis", {0,0,0}, {1,0,0}, -600, 600};
+    MachineComponent y{"Y Axis", {0,0,0}, {0,1,0}, -500, 500};
+    MachineComponent z{"Z Axis", {0,0,0}, {0,0,1}, -400,   0};
+    MachineComponent a{"A Axis", {0,0,0}, {1,0,0},  -30, 120};
+    MachineComponent c{"C Axis", {0,0,0}, {0,0,1}, -360, 360};
+    m.components = {x, y, z, a, c};
+    return m;
+}
+
+MachineModel MachineModel::fiveAxisHeadHead() {
+    MachineModel m;
+    m.name = "5-Axis Head/Head (dual-spindle-head)";
+    m.kinematics.type     = MachineKinematics::Type::Head_Head;
+    m.kinematics.aAxisMin = -110; m.kinematics.aAxisMax = 110;
+    m.kinematics.bAxisMin = -180; m.kinematics.bAxisMax = 180;
+
+    MachineComponent x{"X Axis", {0,0,0}, {1,0,0}, -800, 800};
+    MachineComponent y{"Y Axis", {0,0,0}, {0,1,0}, -700, 700};
+    MachineComponent z{"Z Axis", {0,0,0}, {0,0,1}, -600,   0};
+    MachineComponent a{"A Axis", {0,0,0}, {1,0,0}, -110, 110};
+    MachineComponent b{"B Axis", {0,0,0}, {0,1,0}, -180, 180};
+    m.components = {x, y, z, a, b};
+    return m;
+}
+
 // --------------------------------------------------------------------------
 MachineSimulation::MachineSimulation(MachineModel model)
     : m_model(std::move(model)) {}

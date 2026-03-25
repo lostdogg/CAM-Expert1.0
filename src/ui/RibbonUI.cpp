@@ -200,12 +200,46 @@ void RibbonUI::setActiveTab(int tabIndex) {
 }
 
 // --------------------------------------------------------------------------
-void RibbonUI::enableButton(int /*commandId*/, bool /*enabled*/) {
-    // In a production implementation this would walk m_tabs and update the
-    // corresponding toolbar button state via TB_ENABLEBUTTON.
+void RibbonUI::enableButton(int commandId, bool enabled) {
+    // Walk all tabs and all groups to find the button with matching commandId
+    for (auto& tab : m_tabs) {
+        for (auto& group : tab.groups) {
+            for (auto& btn : group.buttons) {
+                if (btn.commandId == commandId) {
+                    btn.enabled = enabled;
+                    // If the tab with this button is currently active, update
+                    // the toolbar button state via TB_ENABLEBUTTON.
+                    if (m_toolbar) {
+                        SendMessageW(m_toolbar, TB_ENABLEBUTTON,
+                                     static_cast<WPARAM>(commandId),
+                                     MAKELPARAM(enabled ? TRUE : FALSE, 0));
+                    }
+                    return;
+                }
+            }
+        }
+    }
 }
 
-void RibbonUI::checkButton(int /*commandId*/, bool /*checked*/) {}
+void RibbonUI::checkButton(int commandId, bool checked) {
+    // Walk all tabs and all groups to find the button with matching commandId
+    for (auto& tab : m_tabs) {
+        for (auto& group : tab.groups) {
+            for (auto& btn : group.buttons) {
+                if (btn.commandId == commandId) {
+                    btn.checked = checked;
+                    // Update the toolbar button pressed/checked state
+                    if (m_toolbar) {
+                        SendMessageW(m_toolbar, TB_CHECKBUTTON,
+                                     static_cast<WPARAM>(commandId),
+                                     MAKELPARAM(checked ? TRUE : FALSE, 0));
+                    }
+                    return;
+                }
+            }
+        }
+    }
+}
 
 bool RibbonUI::handleCommand(int /*commandId*/) {
     return false; // parent handles commands
