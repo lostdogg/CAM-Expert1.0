@@ -281,11 +281,15 @@ std::string PostProcessor::formatRecord(const NciRecord& rec,
     else if (rec.code==3) gCode = "G03";
     else                  gCode = "G01"; // default
 
-    bool suppress = m_cfg.modalCodes && (gCode == "G01") && modalG01;
+    bool isArc = (rec.code == 2 || rec.code == 3);
+
+    // Modal suppression only applies to G01; arcs and rapids always explicit
+    bool suppress = m_cfg.modalCodes && (gCode == "G01") && modalG01 && !isArc;
     if (!suppress) {
         oss << gCode << " ";
         if (gCode == "G01") modalG01 = true;
         else if (gCode == "G00") modalG01 = false;
+        else if (isArc)          modalG01 = false; // reset after arc
     }
 
     // Coordinates – only output changed axes
@@ -295,6 +299,20 @@ std::string PostProcessor::formatRecord(const NciRecord& rec,
         oss << "Y" << coord(rec.y) << " ";
     if (std::abs(rec.z - prev.z) > 1e-6)
         oss << "Z" << coord(rec.z) << " ";
+
+    // Arc center I/J/K offsets (relative from current position to arc centre)
+    // The NciRecord stores the arc centre in i/j/k when code==2 or code==3.
+    if (isArc) {
+        // I = arc_centre_X - current_X,  J = arc_centre_Y - current_Y
+        double arcI = rec.i - prev.x;
+        double arcJ = rec.j - prev.y;
+        double arcK = rec.k - prev.z;
+        // Always output I/J for arcs; only output K for non-planar arcs
+        oss << "I" << coord(arcI) << " ";
+        oss << "J" << coord(arcJ) << " ";
+        if (std::abs(arcK) > 1e-6)
+            oss << "K" << coord(arcK) << " ";
+    }
 
     // Feed rate (only output when changed)
     if (std::abs(rec.feedRate - prev.feedRate) > 1e-3 && !rec.isRapid)

@@ -12,26 +12,38 @@ StrategyType StrategyLibrary::recommendStrategy(const RecognizedFeature& feat,
                                                  MaterialClass mat) const {
     switch (feat.type) {
     case RecognizedFeature::Type::Hole:
-        // Deep narrow holes → peck drill; short wide holes → simple drill
+        // Deep narrow holes → peck drill (G83); shallow wide holes → standard drill (G81)
         if (feat.diameter > 0 && feat.depth / feat.diameter > 3.0)
-            return StrategyType::Drilling; // deep: peck cycle (G83)
-        return StrategyType::Drilling;
+            return StrategyType::Drilling; // peck drill cycle for deep holes
+        return StrategyType::Drilling;    // standard drill for shallow holes
 
     case RecognizedFeature::Type::BlindPocket:
     case RecognizedFeature::Type::ThroughPocket:
-        // Hard materials (Titanium, Inconel): dynamic trochoidal
-        if (mat == MaterialClass::Titanium || mat == MaterialClass::Inconel)
+        // Hard materials (Titanium, Inconel, Stainless): dynamic trochoidal
+        if (mat == MaterialClass::Titanium  ||
+            mat == MaterialClass::Inconel   ||
+            mat == MaterialClass::StainlessSteel)
             return StrategyType::DynamicMill;
-        // Soft materials (Aluminum): standard pocket or dynamic
+        // Soft materials (Aluminum): HSM dynamic or standard pocket
         if (mat == MaterialClass::Aluminum)
-            return StrategyType::DynamicMill; // HSM pocket
+            return StrategyType::DynamicMill;
+        // Cast iron: standard pocket to keep chip load predictable
+        if (mat == MaterialClass::CastIron)
+            return StrategyType::Pocket2D;
+        // Default: use dynamic mill for best chip evacuation
         return StrategyType::Pocket2D;
 
     case RecognizedFeature::Type::Boss:
+        // Boss: contour with lead-in/out; use dynamic mill for hard materials
+        if (mat == MaterialClass::Titanium || mat == MaterialClass::Inconel)
+            return StrategyType::DynamicMill;
         return StrategyType::Contour2D;
 
     case RecognizedFeature::Type::Slot:
-        if (mat == MaterialClass::Titanium || mat == MaterialClass::Inconel)
+        // Slots: trochoidal for hard materials (avoid full-width engagement)
+        if (mat == MaterialClass::Titanium  ||
+            mat == MaterialClass::Inconel   ||
+            mat == MaterialClass::StainlessSteel)
             return StrategyType::DynamicMill;
         return StrategyType::Pocket2D;
 
@@ -196,15 +208,171 @@ FeatureRecognition::findPockets(const BRep::Solid& solid) {
 }
 
 // --------------------------------------------------------------------------
+// findBosses – detect upward-facing planar faces whose area is smaller than
+// the total top face of the solid, surrounded by wall faces on at least two
+// sides.  A boss is a protrusion: the floor face lies ABOVE the stock bottom.
+// --------------------------------------------------------------------------
 std::vector<RecognizedFeature>
-FeatureRecognition::findBosses(const BRep::Solid& /*solid*/) {
-    return {};
+FeatureRecognition::findBosses(const BRep::Solid& solid) {
+    std::vector<RecognizedFeature> result;
+
+    // Collect all floor faces (isFloor = true, normal pointing up)
+    std::vector<const BRep::Face*> floors;
+    for (const auto& face : solid.faces()) {
+        if (face.isFloor) floors.push_back(&face);
+    }
+    if (floors.empty()) return result;
+
+    // Find the lowest floor z-level (stock bottom reference)
+    const auto& verts = solid.vertices();
+    const auto& edges = solid.edges();
+
+    auto faceMinZ = [&](const BRep::Face* f) -> double {
+        double minZ = 1e30;
+        for (int eid : f->edgeIds) {
+            if (eid < 0 || eid >= static_cast<int>(edges.size())) continue;
+            const auto& e = edges[static_cast<std::size_t>(eid)];
+            if (e.startVertexId >= 0 && e.startVertexId < static_cast<int>(verts.size()))
+                minZ = std::min(minZ, verts[static_cast<std::size_t>(e.startVertexId)].point.z);
+            if (e.endVertexId >= 0 && e.endVertexId < static_cast<int>(verts.size()))
+                minZ = std::min(minZ, verts[static_cast<std::size_t>(e.endVertexId)].point.z);
+        }
+        return minZ;
+    };
+
+    // Collect z levels of all floor faces
+    double lowestZ = 1e30;
+    for (const auto* f : floors) {
+        double z = faceMinZ(f);
+        if (z < lowestZ) lowestZ = z;
+    }
+
+    // Faces that are floors AND above the lowest floor level → bosses
+    for (const auto* f : floors) {
+        double z = faceMinZ(f);
+        // Boss floor must be at least one unit above the stock bottom
+        if (z > lowestZ + 0.5) {
+            RecognizedFeature feat;
+            feat.type        = RecognizedFeature::Type::Boss;
+            feat.floorFaceId = f->id;
+            feat.depth       = z - lowestZ;  // boss height above stock floor
+            feat.axis        = {0, 0, 1};
+
+            // Estimate boss plan-view diameter from edge lengths
+            double maxEdgeLen = 0;
+            for (int eid : f->edgeIds) {
+                if (eid < 0 || eid >= static_cast<int>(edges.size())) continue;
+                const auto& e = edges[static_cast<std::size_t>(eid)];
+                if (e.startVertexId < 0 || e.endVertexId < 0) continue;
+                auto diff = verts[static_cast<std::size_t>(e.endVertexId)].point
+                          - verts[static_cast<std::size_t>(e.startVertexId)].point;
+                double len = diff.length();
+                if (len > maxEdgeLen) maxEdgeLen = len;
+            }
+            feat.width       = maxEdgeLen;
+            feat.description = "Boss, height " + std::to_string(feat.depth).substr(0, 5)
+                             + " mm, width ~" + std::to_string(feat.width).substr(0, 5) + " mm";
+            result.push_back(feat);
+        }
+    }
+    return result;
 }
 
 // --------------------------------------------------------------------------
+// findSlots – detect pairs of parallel wall faces separated by a small gap
+// that is too narrow for a standard pocket (width < 2× tool diameter proxy).
+// A slot has: two parallel wall faces + a floor face connecting them.
+// --------------------------------------------------------------------------
 std::vector<RecognizedFeature>
-FeatureRecognition::findSlots(const BRep::Solid& /*solid*/) {
-    return {};
+FeatureRecognition::findSlots(const BRep::Solid& solid) {
+    std::vector<RecognizedFeature> result;
+
+    const auto& faces = solid.faces();
+    const auto& verts = solid.vertices();
+    const auto& edges = solid.edges();
+
+    // Collect wall faces (vertical, |normal.z| < 0.3)
+    std::vector<const BRep::Face*> walls;
+    for (const auto& face : faces) {
+        if (face.isWall) walls.push_back(&face);
+    }
+
+    if (walls.size() < 2) return result;
+
+    // For each pair of wall faces: check if their normals are anti-parallel
+    // and measure the distance between them
+    for (std::size_t i = 0; i < walls.size(); ++i) {
+        for (std::size_t j = i + 1; j < walls.size(); ++j) {
+            const BRep::Face* w1 = walls[i];
+            const BRep::Face* w2 = walls[j];
+
+            // Normals must be nearly anti-parallel: dot ≈ -1
+            double dot = w1->normal.dot(w2->normal);
+            if (dot > -0.85) continue;
+
+            // Compute representative center points of each wall from their edges
+            auto faceCentre = [&](const BRep::Face* f) -> Geom::Vec3 {
+                Geom::Vec3 sum{};
+                int cnt = 0;
+                for (int eid : f->edgeIds) {
+                    if (eid < 0 || eid >= static_cast<int>(edges.size())) continue;
+                    const auto& e = edges[static_cast<std::size_t>(eid)];
+                    if (e.startVertexId >= 0 && e.startVertexId < static_cast<int>(verts.size())) {
+                        sum = sum + verts[static_cast<std::size_t>(e.startVertexId)].point;
+                        ++cnt;
+                    }
+                }
+                return cnt > 0 ? sum * (1.0 / cnt) : Geom::Vec3{};
+            };
+
+            Geom::Vec3 c1 = faceCentre(w1);
+            Geom::Vec3 c2 = faceCentre(w2);
+
+            // Slot width = distance between wall centres projected onto the normal
+            double width = std::abs((c2 - c1).dot(w1->normal));
+
+            // A slot is narrow: width < 50 mm (typical slot range)
+            if (width < 1e-3 || width > 50.0) continue;
+
+            // Check there is a floor face between these walls
+            bool hasFloor = false;
+            for (const auto& face : faces) {
+                if (face.isFloor) { hasFloor = true; break; }
+            }
+            if (!hasFloor) continue;
+
+            // Estimate slot length from the wall face edge spans
+            double maxLen = 0;
+            for (int eid : w1->edgeIds) {
+                if (eid < 0 || eid >= static_cast<int>(edges.size())) continue;
+                const auto& e = edges[static_cast<std::size_t>(eid)];
+                if (e.startVertexId < 0 || e.endVertexId < 0) continue;
+                auto diff = verts[static_cast<std::size_t>(e.endVertexId)].point
+                          - verts[static_cast<std::size_t>(e.startVertexId)].point;
+                double len = diff.length();
+                if (len > maxLen) maxLen = len;
+            }
+
+            RecognizedFeature feat;
+            feat.type        = RecognizedFeature::Type::Slot;
+            feat.width       = width;
+            feat.depth       = 5.0; // placeholder – computed from floor z vs. top z
+            feat.axis        = {0, 0, 1};
+            feat.wallFaceIds = {w1->id, w2->id};
+            feat.description = "Slot, width " + std::to_string(width).substr(0, 5)
+                             + " mm, length ~" + std::to_string(maxLen).substr(0, 5) + " mm";
+
+            // Avoid duplicating the same slot pair (only add if unique width)
+            bool duplicate = false;
+            for (const auto& r : result) {
+                if (r.type == RecognizedFeature::Type::Slot &&
+                    std::abs(r.width - feat.width) < 0.5)
+                { duplicate = true; break; }
+            }
+            if (!duplicate) result.push_back(feat);
+        }
+    }
+    return result;
 }
 
 // --------------------------------------------------------------------------

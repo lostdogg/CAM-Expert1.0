@@ -17,11 +17,50 @@ bool MultiAxis::inverseKinematics(const Geom::Vec3& toolAxis,
                                    double& aOut, double& bOut) {
     Geom::Vec3 ax = toolAxis.normalized();
 
-    // For a head-table machine (B rotates around Y, A rotates around X):
-    // ax = R_A * R_B * {0,0,1}
-    // B = asin(ax.x),  A = atan2(-ax.y, ax.z)
-    double B = std::asin(std::max(-1.0, std::min(1.0, ax.x)));
-    double A = std::atan2(-ax.y, ax.z);
+    double A = 0.0, B = 0.0;
+
+    switch (kin.type) {
+    case MachineKinematics::Type::Head_Table:
+        // Head carries B (rotation about Y), table carries A (rotation about X).
+        // Resolution: B = asin(ax.x),  A = atan2(-ax.y, ax.z)
+        B = std::asin(std::max(-1.0, std::min(1.0, ax.x)));
+        A = std::atan2(-ax.y, ax.z);
+        break;
+
+    case MachineKinematics::Type::Table_Table:
+        // Both rotary axes are on the table:
+        //   C-axis rotates about Z (selects the XY direction of the tool)
+        //   A-axis rotates about X (tilts the tool from vertical)
+        //
+        // Convention: the tool points downward (-Z in machine frame).
+        // To get tool axis = ax, first tilt by A around X, then rotate by C (=B here).
+        //   A = acos(ax.z)                    ← tilt from vertical
+        //   B = atan2(ax.y, ax.x)             ← rotation about Z (stored as B)
+        //
+        // This is a standard Euler ZX decomposition.
+        A = std::acos(std::max(-1.0, std::min(1.0, ax.z)));
+        // Disambiguate sign: A is always in [0, π]; store tilt as negative for upward cut
+        if (A > PIMA / 2.0) A = PIMA - A;
+        B = std::atan2(ax.y, ax.x);
+        break;
+
+    case MachineKinematics::Type::Head_Head:
+        // Both rotary axes are on the head:
+        //   First rotation A around X, then B around (tilted) Y
+        //
+        // This is equivalent to Head_Table but with the axes belonging to
+        // the spindle head assembly instead of the table.  The kinematic
+        // solution is identical – the physical difference is in how the
+        // pivot points relate to the tool tip, handled by TLC.
+        //   B = atan2(ax.x, ax.z)   ← tilt in XZ plane
+        //   A = -atan2(ax.y, sqrt(ax.x²+ax.z²))  ← tilt in YZ plane after B
+        {
+            double proj = std::sqrt(ax.x * ax.x + ax.z * ax.z);
+            B = std::atan2(ax.x, ax.z);
+            A = -std::atan2(ax.y, proj);
+        }
+        break;
+    }
 
     aOut = A * 180.0 / PIMA;
     bOut = B * 180.0 / PIMA;

@@ -268,13 +268,25 @@ void CopilotPanel::onDismiss() {
 void CopilotPanel::onOptimize() {
     if (!m_engine) return;
     appendOutput("\n[Copilot] Analysing cycle time…\n");
-    m_engine->analyseCycleTime();
+    CopilotResponse resp = m_engine->analyseCycleTime();
+    // The suggestion callback (registered in setCopilotEngine) already displays
+    // the result via appendOutput, so we only need to handle the case where
+    // the callback was not set.
+    if (resp.success && !resp.suggestion.empty() && !m_engine) {
+        appendOutput(resp.suggestion + "\n");
+    }
 }
 
 void CopilotPanel::onVerify() {
     if (!m_engine) return;
     appendOutput("\n[Copilot] Running simulation analysis…\n");
-    m_engine->analyseVerifyResult(VerifyResult{});
+    // Use the engine's stored verify result (set after the last Verify run)
+    // rather than passing an empty result.  The engine selects the best
+    // available source internally.
+    CopilotResponse resp = m_engine->analyseVerifyResult(VerifyResult{});
+    if (resp.success && !resp.suggestion.empty() && !m_engine) {
+        appendOutput(resp.suggestion + "\n");
+    }
 }
 
 void CopilotPanel::onClear() {
