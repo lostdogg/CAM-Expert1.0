@@ -52,6 +52,11 @@ set(SOURCES
     src/copilot/ParameterNegotiator.cpp
     src/copilot/AuditLog.cpp
     src/copilot/CopilotEngine.cpp
+    src/copilot/LocalInferenceEngine.cpp
+    src/copilot/VectorDatabase.cpp
+    src/copilot/GeometricTokenizer.cpp
+    src/copilot/ConstrainedOutputValidator.cpp
+    src/copilot/SelfCorrectionLoop.cpp
     src/ui/CopilotPanel.cpp
 )
 
@@ -96,6 +101,11 @@ set(HEADERS
     src/copilot/ParameterNegotiator.h
     src/copilot/AuditLog.h
     src/copilot/CopilotEngine.h
+    src/copilot/LocalInferenceEngine.h
+    src/copilot/VectorDatabase.h
+    src/copilot/GeometricTokenizer.h
+    src/copilot/ConstrainedOutputValidator.h
+    src/copilot/SelfCorrectionLoop.h
     src/ui/CopilotPanel.h
     src/resources/resource.h
 )

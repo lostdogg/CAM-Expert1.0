@@ -11,10 +11,23 @@
 CopilotEngine::CopilotEngine()
     : m_negotiator(nullptr)
     , m_auditLog(std::make_unique<AuditLog>())   // in-memory until setAuditLogPath
+    , m_validator(nullptr)                        // uses default MaterialLibrary
 {}
 
 void CopilotEngine::setAuditLogPath(const std::string& path) {
     m_auditLog = std::make_unique<AuditLog>(path);
+}
+
+bool CopilotEngine::loadInferenceModel(std::string* errorOut) {
+    return m_inferenceEngine.loadModel(errorOut);
+}
+
+void CopilotEngine::unloadInferenceModel() {
+    m_inferenceEngine.unloadModel();
+}
+
+std::string CopilotEngine::hardwareSummary() const {
+    return m_inferenceEngine.hardwareSummary();
 }
 
 // --------------------------------------------------------------------------
@@ -137,11 +150,67 @@ CopilotResponse CopilotEngine::processCommand(const std::string& command) {
     // 3. Negotiate parameters
     NegotiatedParams params = m_negotiator.negotiate(intent, ctx);
 
-    // 4. Build suggestion text
+    // 4. Validate parameters through the constrained output pipe
+    //    (prevents hallucinated / physically impossible suggestions)
+    ValidationResult validation = m_validator.validate(
+        params.cuttingParams, params.tool, params.material, params.strategy);
+
+    if (!validation.valid) {
+        // Apply auto-corrected params and add validation report to warning
+        params.cuttingParams = validation.correctedParams;
+        if (params.warningMessage.empty())
+            params.warningMessage = validation.formatReport();
+        else
+            params.warningMessage += "\n" + validation.formatReport();
+    } else if (validation.hasWarnings()) {
+        // Non-fatal warnings: append to advisory
+        std::string warnReport = validation.formatReport();
+        if (!warnReport.empty() && warnReport != "All parameters validated successfully.") {
+            if (params.warningMessage.empty())
+                params.warningMessage = warnReport;
+            else
+                params.warningMessage += "\n" + warnReport;
+        }
+    }
+
+    // 5. Build geometric context block for the local inference engine
+    std::string contextBlock = m_geoTokenizer.buildContextBlock(m_features, ctx);
+
+    // 6. Query RAG knowledge base for relevant entries
+    std::string ragContext;
+    {
+        auto results = m_vectorDb.search(command + " " + params.rationale, 3);
+        if (!results.empty()) {
+            std::ostringstream ragSs;
+            ragSs << "\n[Knowledge Base]\n";
+            for (const auto& r : results) {
+                if (r.score > 0.05 && r.entry) {
+                    ragSs << "  • " << r.entry->title << "\n";
+                }
+            }
+            ragContext = ragSs.str();
+        }
+    }
+
+    // 7. Run local inference (optional enhancement to the rationale)
+    //    The rule-based backend is always available as the fallback.
+    InferenceRequest ireq;
+    ireq.systemPrompt  = "You are a local CAM assistant. Suggest optimal machining parameters.";
+    ireq.contextBlock  = contextBlock;
+    ireq.userQuery     = command;
+    ireq.maxTokens     = 128;
+    ireq.temperature   = 0.1;
+    InferenceResponse iResp = m_inferenceEngine.infer(ireq);
+
+    // 8. Build suggestion text
     std::ostringstream ss;
     ss << "Copilot suggestion for: \"" << command << "\"\n";
     ss << std::string(60, '-') << "\n";
     ss << params.rationale;
+
+    // Append RAG knowledge base hits
+    if (!ragContext.empty())
+        ss << ragContext;
 
     // Stock-awareness note
     if (ctx.stockValidThrough >= 0 && !ctx.operations.empty()) {
@@ -170,6 +239,11 @@ CopilotResponse CopilotEngine::processCommand(const std::string& command) {
     if (!params.warningMessage.empty())
         ss << "\n[Advisory] " << params.warningMessage;
 
+    // Inference debug info (only shown if backend is not rule-based)
+    if (iResp.success && m_inferenceEngine.backendName() != "RuleBased")
+        resp.debugInfo = "Inference (" + m_inferenceEngine.backendName() + "): "
+                         + std::to_string(static_cast<int>(iResp.inferenceMs)) + " ms";
+
     ss << "\n\nClick \"Apply\" to generate the toolpath, or \"Dismiss\" to cancel.";
 
     resp.success        = true;
@@ -177,7 +251,7 @@ CopilotResponse CopilotEngine::processCommand(const std::string& command) {
     resp.warningMessage = params.warningMessage;
     resp.params         = params;
 
-    // 5. Audit
+    // 9. Audit
     AuditEntry e;
     e.command   = command;
     e.action    = actionToString(intent.action);
@@ -187,7 +261,7 @@ CopilotResponse CopilotEngine::processCommand(const std::string& command) {
     e.outcome   = AuditOutcome::Proposed;
     resp.auditIndex = m_auditLog->record(e);
 
-    // 6. Fire callback
+    // 10. Fire callback
     m_lastResponse       = resp;
     m_pendingSuggestion  = true;
     if (m_suggestionCb) m_suggestionCb(resp);
@@ -224,6 +298,16 @@ bool CopilotEngine::applyLastSuggestion() {
     m_toolpathMgr->addToolpath(std::move(tp));
 
     m_auditLog->updateOutcome(m_lastResponse.auditIndex, AuditOutcome::Accepted);
+
+    // Record the accepted suggestion in the local RAG knowledge base so
+    // future sessions can benefit from this project's history.
+    m_vectorDb.recordProjectHistory(
+        strategyToString(p.strategy),
+        materialToString(p.material),
+        p.tool.diameter,
+        strategyToString(p.strategy),
+        "User accepted. Tool: " + p.tool.name);
+
     m_pendingSuggestion = false;
     return true;
 }
@@ -260,8 +344,23 @@ CopilotResponse CopilotEngine::buildGougeSuggestion(const VerifyResult& result) 
             ss << "Max gouge depth: " << std::fixed << std::setprecision(3)
                << result.maxGougeDepth << " mm\n\n";
 
-            // Actionable suggestions
-            ss << "Suggested remediation:\n";
+            // Run self-correction loop to generate specific remediation
+            CuttingParams corrParams;
+            CuttingTool   corrTool;
+            // If we have a last response with valid params, use those
+            if (m_pendingSuggestion) {
+                corrParams = m_lastResponse.params.cuttingParams;
+                corrTool   = m_lastResponse.params.tool;
+            }
+            CorrectionResult correction = m_correctionLoop.analyseAndCorrect(
+                result, corrParams, corrTool);
+
+            ss << "AI-Suggested Correction:\n";
+            ss << "  " << correction.description << "\n";
+            if (!correction.warningMessage.empty())
+                ss << "  [Advisory] " << correction.warningMessage << "\n";
+
+            ss << "\nGeneral remediation:\n";
             ss << "  1. Increase the clearance plane by at least "
                << std::fixed << std::setprecision(3)
                << (result.maxGougeDepth + 0.5) << " mm on all retract moves.\n";
