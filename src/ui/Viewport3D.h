@@ -9,6 +9,7 @@
 
 // Forward declaration so we don't pull in ToolpathManager.h everywhere
 class ToolpathManager;
+class SolidsManager;
 
 // --------------------------------------------------------------------------
 // Viewport3D
@@ -42,6 +43,10 @@ public:
     // The pointer is non-owning; caller is responsible for lifetime.
     void setToolpathManager(const ToolpathManager* mgr);
 
+    // Provide a solids manager so the viewport can render BRep solid bodies.
+    // The pointer is non-owning; caller is responsible for lifetime.
+    void setSolidsManager(const SolidsManager* mgr);
+
     RenderMode renderMode() const { return m_renderMode; }
     HWND hwnd() const { return m_hwnd; }
 
@@ -56,6 +61,7 @@ private:
     void drawGrid();
     void drawAxes();
     void drawStock();
+    void drawSolids();     // render BRep solid bodies from SolidsManager
     void drawToolpaths();
 
     // Returns an RGB colour triple for a given motion type
@@ -81,6 +87,7 @@ private:
     HGLRC                 m_hGLRC     = nullptr;
     RenderMode            m_renderMode= RenderMode::Shaded;
     const ToolpathManager* m_toolpathMgr = nullptr;  // non-owning
+    const SolidsManager*   m_solidsMgr   = nullptr;  // non-owning
 
     static constexpr const wchar_t* CLASS_NAME = L"CAMExpertViewport";
 };

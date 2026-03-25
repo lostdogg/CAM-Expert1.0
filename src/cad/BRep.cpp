@@ -164,4 +164,101 @@ Solid Solid::makeCylinder(double radius, double height) {
     return s;
 }
 
+// --------------------------------------------------------------------------
+// Factory: UV sphere (tessellated with flat-shaded triangles/quads)
+// latBands  – number of horizontal latitude strips (≥ 2)
+// lonSegs   – number of longitudinal segments per ring (≥ 3)
+// --------------------------------------------------------------------------
+Solid Solid::makeSphere(double radius, int latBands, int lonSegs) {
+    Solid s;
+    s.setName("Sphere");
+    if (latBands < 2) latBands = 2;
+    if (lonSegs  < 3) lonSegs  = 3;
+
+    const double PI = 3.14159265358979323846;
+
+    // Top pole vertex
+    int topPole = s.addVertex({0.0, 0.0, radius});
+
+    // Ring vertices: rings[lat][lon]  (lat = 1 .. latBands-1)
+    std::vector<std::vector<int>> rings;
+    rings.reserve(static_cast<std::size_t>(latBands - 1));
+    for (int i = 1; i < latBands; ++i) {
+        double phi = PI * i / latBands;        // 0 (top) → PI (bottom)
+        double z   = radius * std::cos(phi);
+        double r   = radius * std::sin(phi);
+        std::vector<int> ring;
+        ring.reserve(static_cast<std::size_t>(lonSegs));
+        for (int j = 0; j < lonSegs; ++j) {
+            double theta = 2.0 * PI * j / lonSegs;
+            ring.push_back(s.addVertex({r * std::cos(theta), r * std::sin(theta), z}));
+        }
+        rings.push_back(ring);
+    }
+
+    // Bottom pole vertex
+    int botPole = s.addVertex({0.0, 0.0, -radius});
+
+    const auto& verts = s.m_vertices;  // alias for normal computation
+
+    // Top cap: one triangle fan from topPole → first ring
+    for (int j = 0; j < lonSegs; ++j) {
+        int v0 = topPole;
+        int v1 = rings[0][j];
+        int v2 = rings[0][(j + 1) % lonSegs];
+        int e0 = s.addEdge(v0, v1);
+        int e1 = s.addEdge(v1, v2, true);
+        int e2 = s.addEdge(v2, v0);
+        // Face normal: centroid of the three vertices / radius
+        Geom::Vec3 n{
+            (verts[v0].point.x + verts[v1].point.x + verts[v2].point.x) / (3.0 * radius),
+            (verts[v0].point.y + verts[v1].point.y + verts[v2].point.y) / (3.0 * radius),
+            (verts[v0].point.z + verts[v1].point.z + verts[v2].point.z) / (3.0 * radius)
+        };
+        s.addFace(FaceType::Spherical, {e0, e1, e2}, n);
+    }
+
+    // Middle bands: quad strips between adjacent rings
+    for (int i = 0; i < static_cast<int>(rings.size()) - 1; ++i) {
+        for (int j = 0; j < lonSegs; ++j) {
+            int v0 = rings[i][j];
+            int v1 = rings[i][(j + 1) % lonSegs];
+            int v2 = rings[i + 1][(j + 1) % lonSegs];
+            int v3 = rings[i + 1][j];
+            int e0 = s.addEdge(v0, v1, true);
+            int e1 = s.addEdge(v1, v2);
+            int e2 = s.addEdge(v2, v3, true);
+            int e3 = s.addEdge(v3, v0);
+            Geom::Vec3 n{
+                (verts[v0].point.x + verts[v1].point.x +
+                 verts[v2].point.x + verts[v3].point.x) / (4.0 * radius),
+                (verts[v0].point.y + verts[v1].point.y +
+                 verts[v2].point.y + verts[v3].point.y) / (4.0 * radius),
+                (verts[v0].point.z + verts[v1].point.z +
+                 verts[v2].point.z + verts[v3].point.z) / (4.0 * radius)
+            };
+            s.addFace(FaceType::Spherical, {e0, e1, e2, e3}, n);
+        }
+    }
+
+    // Bottom cap: one triangle fan from last ring → botPole
+    const auto& lastRing = rings.back();
+    for (int j = 0; j < lonSegs; ++j) {
+        int v0 = lastRing[j];
+        int v1 = lastRing[(j + 1) % lonSegs];
+        int v2 = botPole;
+        int e0 = s.addEdge(v0, v1, true);
+        int e1 = s.addEdge(v1, v2);
+        int e2 = s.addEdge(v2, v0);
+        Geom::Vec3 n{
+            (verts[v0].point.x + verts[v1].point.x + verts[v2].point.x) / (3.0 * radius),
+            (verts[v0].point.y + verts[v1].point.y + verts[v2].point.y) / (3.0 * radius),
+            (verts[v0].point.z + verts[v1].point.z + verts[v2].point.z) / (3.0 * radius)
+        };
+        s.addFace(FaceType::Spherical, {e0, e1, e2}, n);
+    }
+
+    return s;
+}
+
 } // namespace BRep

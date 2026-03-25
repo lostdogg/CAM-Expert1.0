@@ -12,6 +12,7 @@
 #include "simulation/Verify.h"
 #include "simulation/MachineSimulation.h"
 #include "cam/PostProcessor.h"
+#include "cam/DynamicMotion.h"
 #include "cad/FileImporter.h"
 #include "cad/ModelPrep.h"
 #include "cad/FeatureRecognition.h"
@@ -228,6 +229,23 @@ LRESULT MainWindow::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         onCommand(LOWORD(wParam));
         return 0;
 
+    case WM_KEYDOWN: {
+        // Keyboard shortcuts (processed when main window has focus)
+        bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        if (ctrl) {
+            switch (static_cast<int>(wParam)) {
+            case 'N': onCommand(IDM_FILE_NEW);     return 0;
+            case 'O': onCommand(IDM_FILE_OPEN);    return 0;
+            case 'S': onCommand(IDM_FILE_SAVE);    return 0;
+            case 'I': onCommand(IDM_FILE_IMPORT);  return 0;
+            case 'P': onCommand(IDM_MACHINE_POST); return 0;
+            }
+        }
+        if (wParam == VK_F1)  { onCommand(IDM_COPILOT_TOGGLE);  return 0; }
+        if (wParam == VK_F5)  { onCommand(IDM_MACHINE_REGEN);   return 0; }
+        break;
+    }
+
     case WM_PAINT:
         onPaint();
         return 0;
@@ -235,15 +253,14 @@ LRESULT MainWindow::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_DESTROY:
         onDestroy();
         return 0;
-
-    default:
-        return DefWindowProcW(m_hwnd, msg, wParam, lParam);
     }
+    return DefWindowProcW(m_hwnd, msg, wParam, lParam);
 }
 
 // --------------------------------------------------------------------------
 void MainWindow::onCreate() {
     buildMenu();
+    updateWindowTitle();   // set initial "Untitled" title
 
     HINSTANCE hInst = Application::instance().hInstance();
 
@@ -291,6 +308,9 @@ void MainWindow::onCreate() {
 
     // Connect toolpath manager to the viewport so toolpaths are rendered live
     m_viewport->setToolpathManager(m_toolpathMgr.get());
+
+    // Connect the solids manager to the viewport so BRep solids are rendered
+    m_viewport->setSolidsManager(m_solidsMgr.get());
 
     // Connect the toolpath manager change callback to trigger a viewport redraw
     m_toolpathMgr->setOnChange([this]() {
@@ -351,6 +371,12 @@ void MainWindow::buildMenu() {
     AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_SIM,      L"Machine &Simulation");
     AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_POST,     L"&Post Process…");
+    AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_GEN_POCKET,  L"Generate 2D &Pocket…");
+    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_GEN_CONTOUR, L"Generate 2D &Contour…");
+    AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_REGEN,    L"Re&generate All\tF5");
+    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_SUMMARY,  L"&Machining Summary…");
 
     // View menu
     AppendMenuW(hView, MF_STRING, IDM_VIEW_WIREFRAME, L"&Wireframe");
@@ -361,6 +387,11 @@ void MainWindow::buildMenu() {
     AppendMenuW(hView, MF_STRING, IDM_VIEW_FRONT,     L"&Front");
     AppendMenuW(hView, MF_STRING, IDM_VIEW_TOP,       L"&Top");
     AppendMenuW(hView, MF_STRING, IDM_VIEW_RIGHT,     L"&Right");
+    AppendMenuW(hView, MF_STRING, IDM_VIEW_BACK,      L"&Back");
+    AppendMenuW(hView, MF_STRING, IDM_VIEW_BOTTOM,    L"Bot&tom");
+    AppendMenuW(hView, MF_STRING, IDM_VIEW_LEFT,      L"&Left");
+    AppendMenuW(hView, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hView, MF_STRING, IDM_VIEW_FIT,       L"Fit &All");
 
     // Help menu
     AppendMenuW(hHelp, MF_STRING, IDM_HELP_ABOUT,      L"&About CAM-Expert…");
@@ -436,6 +467,10 @@ void MainWindow::onCommand(int id) {
     case IDM_MACHINE_VERIFY:   runVerify();     break;
     case IDM_MACHINE_SIM:      runMachineSim(); break;
     case IDM_MACHINE_POST:     postProcess();   break;
+    case IDM_MACHINE_GEN_POCKET:  generateToolpathPocket();  break;
+    case IDM_MACHINE_GEN_CONTOUR: generateToolpathContour(); break;
+    case IDM_MACHINE_REGEN:       regenerateAllToolpaths();  break;
+    case IDM_MACHINE_SUMMARY:     showMachiningSummary();    break;
 
     case IDM_VIEW_WIREFRAME:
         if (m_viewport) m_viewport->setRenderMode(RenderMode::Wireframe);
@@ -496,6 +531,7 @@ void MainWindow::onCommand(int id) {
 
     case IDM_SOLID_EXTRUDE:  createSolidBox();             break;
     case IDM_SOLID_REVOLVE:  createSolidCylinder();        break;
+    case IDM_SOLID_SPHERE:   createSolidSphere();          break;
     case IDM_SOLID_UNION:
     case IDM_SOLID_SUBTRACT:
     case IDM_SOLID_INTERSECT:
@@ -561,6 +597,8 @@ void MainWindow::fileNew() {
     if (m_solidsMgr)   m_solidsMgr->clear();
     if (m_levelsMgr)   m_levelsMgr->clear();
     if (m_viewport)    m_viewport->reset();
+    m_currentFile.clear();
+    updateWindowTitle();
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
         reinterpret_cast<LPARAM>(L"New file created."));
 }
@@ -1558,6 +1596,8 @@ void MainWindow::saveProjectCamx(const std::wstring& wpath) {
 
     f << "END\n";
 
+    m_currentFile = wpath;
+    updateWindowTitle();
     std::wstring msg = L"Project saved: " + wpath;
     SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg.c_str()));
 }
@@ -1676,9 +1716,267 @@ void MainWindow::loadProjectCamx(const std::wstring& wpath) {
 
     if (m_viewport) m_viewport->redraw();
 
+    m_currentFile = wpath;
+    updateWindowTitle();
+
     wchar_t msg[256] = {};
     std::swprintf(msg, 256,
         L"Loaded: %d solid(s), %d toolpath(s)  ←  %ls",
         solidsLoaded, toolpathsLoaded, wpath.c_str());
     SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// ==========================================================================
+// Solid creation – Sphere
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_SPHERE → create a parametric UV sphere
+// --------------------------------------------------------------------------
+void MainWindow::createSolidSphere() {
+    double radius = 25.0;
+    if (!promptSingle(L"Create Sphere",
+                      L"Radius (mm):", radius, radius))
+        return;
+
+    if (radius <= 0) {
+        MessageBoxW(m_hwnd, L"Radius must be positive.",
+                    L"Create Sphere", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    BRep::Solid sphere = BRep::Solid::makeSphere(radius);
+
+    static int sphereCount = 0;
+    std::string name = "Sphere_" + std::to_string(++sphereCount);
+    sphere.setName(name);
+
+    m_solidsMgr->addSolid(std::move(sphere));
+
+    if (m_copilotEngine) {
+        FeatureRecognition fr;
+        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        m_copilotEngine->setRecognisedFeatures(features);
+    }
+
+    wchar_t statusMsg[128] = {};
+    std::swprintf(statusMsg, 128, L"Sphere created: R=%.4g mm", radius);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// ==========================================================================
+// CAM toolpath generation (Machine tab)
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+// Generate a 2D dynamic pocket roughing toolpath from the active solid's
+// bounding box (or a default boundary if no solid is loaded).
+// --------------------------------------------------------------------------
+void MainWindow::generateToolpathPocket() {
+    double toolDiam = 12.0, depth = 10.0;
+    if (!promptDouble2(L"Generate 2D Pocket",
+                       L"Tool diameter (mm):", toolDiam, toolDiam,
+                       L"Pocket depth   (mm):", depth,    depth))
+        return;
+
+    if (toolDiam <= 0 || depth <= 0) {
+        MessageBoxW(m_hwnd, L"Tool diameter and depth must be positive.",
+                    L"Generate 2D Pocket", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // Build a boundary from the active solid or fall back to a default
+    std::vector<Geom::Vec2> boundary;
+    if (m_solidsMgr && m_solidsMgr->count() > 0) {
+        Geom::AABB bb = m_solidsMgr->aggregateBoundingBox();
+        if (bb.isValid()) {
+            boundary = {
+                {bb.min.x, bb.min.y},
+                {bb.max.x, bb.min.y},
+                {bb.max.x, bb.max.y},
+                {bb.min.x, bb.max.y}
+            };
+        }
+    }
+    if (boundary.empty()) {
+        boundary = { {-50,  -50}, { 50, -50}, { 50,  50}, {-50,  50} };
+    }
+
+    CuttingTool tool;
+    tool.diameter    = toolDiam;
+    tool.fluteLength = depth;
+
+    CuttingParams params;
+    params.feedRate     = 800.0;
+    params.plungeRate   = 200.0;
+    params.spindleRPM   = 8000;
+
+    DynamicMotion dm;
+    Toolpath tp = dm.generatePocketRough(boundary, depth, tool, params);
+
+    static int pocketCount = 0;
+    tp.setName("DynPocket_" + std::to_string(++pocketCount));
+
+    m_toolpathMgr->addToolpath(std::move(tp));
+
+    wchar_t statusMsg[160] = {};
+    std::swprintf(statusMsg, 160,
+        L"Pocket toolpath generated: Ø%.4g mm, depth %.4g mm.",
+        toolDiam, depth);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// --------------------------------------------------------------------------
+// Generate a 2D dynamic contour toolpath around the active solid's
+// bounding-box perimeter.
+// --------------------------------------------------------------------------
+void MainWindow::generateToolpathContour() {
+    double toolDiam = 10.0, depth = 5.0;
+    if (!promptDouble2(L"Generate 2D Contour",
+                       L"Tool diameter (mm):", toolDiam, toolDiam,
+                       L"Cut depth      (mm):", depth,    depth))
+        return;
+
+    if (toolDiam <= 0 || depth <= 0) {
+        MessageBoxW(m_hwnd, L"Tool diameter and depth must be positive.",
+                    L"Generate 2D Contour", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // Build a profile from the active solid or fall back to a default
+    std::vector<Geom::Vec2> profile;
+    if (m_solidsMgr && m_solidsMgr->count() > 0) {
+        Geom::AABB bb = m_solidsMgr->aggregateBoundingBox();
+        if (bb.isValid()) {
+            profile = {
+                {bb.min.x, bb.min.y},
+                {bb.max.x, bb.min.y},
+                {bb.max.x, bb.max.y},
+                {bb.min.x, bb.max.y},
+                {bb.min.x, bb.min.y}   // close the loop
+            };
+        }
+    }
+    if (profile.empty()) {
+        profile = { {-50,-50}, {50,-50}, {50,50}, {-50,50}, {-50,-50} };
+    }
+
+    CuttingTool tool;
+    tool.diameter    = toolDiam;
+    tool.fluteLength = depth;
+
+    CuttingParams params;
+    params.feedRate     = 1000.0;
+    params.plungeRate   = 200.0;
+    params.spindleRPM   = 10000;
+
+    DynamicMotion dm;
+    Toolpath tp = dm.generateContour(profile, depth, tool, params);
+
+    static int contourCount = 0;
+    tp.setName("DynContour_" + std::to_string(++contourCount));
+
+    m_toolpathMgr->addToolpath(std::move(tp));
+
+    wchar_t statusMsg[160] = {};
+    std::swprintf(statusMsg, 160,
+        L"Contour toolpath generated: Ø%.4g mm, depth %.4g mm.",
+        toolDiam, depth);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// --------------------------------------------------------------------------
+// Regenerate all toolpaths (marks them clean and triggers a viewport refresh)
+// --------------------------------------------------------------------------
+void MainWindow::regenerateAllToolpaths() {
+    if (!m_toolpathMgr || m_toolpathMgr->count() == 0) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Regenerate: no toolpaths in session."));
+        return;
+    }
+
+    m_toolpathMgr->regenerateAll();
+
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t statusMsg[128] = {};
+    std::swprintf(statusMsg, 128,
+        L"Regenerated %d toolpath(s).", m_toolpathMgr->count());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// --------------------------------------------------------------------------
+// Show machining summary: operation count, total path length, estimated time
+// --------------------------------------------------------------------------
+void MainWindow::showMachiningSummary() {
+    if (!m_toolpathMgr) return;
+
+    int opCount = m_toolpathMgr->count();
+    if (opCount == 0) {
+        MessageBoxW(m_hwnd, L"No toolpaths in the current session.",
+                    L"Machining Summary", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    double totalLen  = m_toolpathMgr->totalPathLength();
+    double totalTime = m_toolpathMgr->totalMachiningTime();  // minutes
+
+    // Build per-operation table as wide string
+    std::wstring detail;
+    detail.reserve(static_cast<std::size_t>(opCount) * 80);
+    detail += L"  #   Operation                       Length (mm)  Time (min)\n";
+    detail += L"  ─────────────────────────────────────────────────────────\n";
+
+    for (int i = 0; i < opCount; ++i) {
+        const Toolpath& tp = m_toolpathMgr->at(i);
+        const std::string& nm = tp.name().empty() ? "Operation" : tp.name();
+
+        // Convert operation name to wide string
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, nm.c_str(), -1, nullptr, 0);
+        std::wstring wname(static_cast<std::size_t>(wlen > 0 ? wlen - 1 : 0), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, nm.c_str(), -1, wname.data(), wlen);
+
+        wchar_t row[256] = {};
+        std::swprintf(row, 256, L"  %2d. %-30ls  %10.1f   %8.2f\n",
+            i + 1, wname.c_str(), tp.totalLength(), tp.estimatedTime());
+        detail += row;
+    }
+
+    wchar_t header[256] = {};
+    std::swprintf(header, 256,
+        L"Operations:   %d\n"
+        L"Total length: %.1f mm  (%.3f m)\n"
+        L"Est. time:    %.2f min  (%.0f sec)\n\n",
+        opCount,
+        totalLen, totalLen / 1000.0,
+        totalTime, totalTime * 60.0);
+
+    std::wstring fullMsg = header;
+    fullMsg += detail;
+
+    MessageBoxW(m_hwnd, fullMsg.c_str(), L"Machining Summary", MB_OK | MB_ICONINFORMATION);
+
+    wchar_t statusMsg[128] = {};
+    std::swprintf(statusMsg, 128,
+        L"Summary: %d op(s), %.1f mm total, %.2f min est.",
+        opCount, totalLen, totalTime);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// --------------------------------------------------------------------------
+// Update the title bar to reflect the current file (or "Untitled")
+// --------------------------------------------------------------------------
+void MainWindow::updateWindowTitle() {
+    std::wstring title = std::wstring(Application::APP_NAME);
+    if (!m_currentFile.empty()) {
+        // Extract just the file name portion for brevity
+        std::size_t sep = m_currentFile.find_last_of(L"\\/");
+        std::wstring fname = (sep != std::wstring::npos)
+                             ? m_currentFile.substr(sep + 1)
+                             : m_currentFile;
+        title += L" – " + fname;
+    } else {
+        title += L" – Untitled";
+    }
+    SetWindowTextW(m_hwnd, title.c_str());
 }

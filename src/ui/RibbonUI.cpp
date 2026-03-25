@@ -107,8 +107,9 @@ void RibbonUI::buildSolidsTab() {
     RibbonTab tab;
     tab.name = "Solids";
     RibbonGroup create{"Create", {
-        {IDM_SOLID_EXTRUDE,  "Extrude",   "Extrude a profile into a solid"},
-        {IDM_SOLID_REVOLVE,  "Revolve",   "Revolve a profile into a solid"}
+        {IDM_SOLID_EXTRUDE,  "Extrude",   "Extrude a profile into a solid (Box)"},
+        {IDM_SOLID_REVOLVE,  "Revolve",   "Revolve a profile into a solid (Cylinder)"},
+        {IDM_SOLID_SPHERE,   "Sphere",    "Create a parametric sphere"}
     }};
     RibbonGroup boolean_{"Boolean", {
         {IDM_SOLID_UNION,    "Union",     "Boolean union of two solids"},
@@ -146,13 +147,23 @@ void RibbonUI::buildModelPrepTab() {
 void RibbonUI::buildMachineTab() {
     RibbonTab tab;
     tab.name = "Machine";
-    RibbonGroup ops{"Operations", {
-        {IDM_MACHINE_BACKPLOT, "Backplot",   "Run backplot animation"},
-        {IDM_MACHINE_VERIFY,   "Verify",     "Run solid verify"},
-        {IDM_MACHINE_SIM,      "Machine Sim","Run machine simulation"},
-        {IDM_MACHINE_POST,     "Post",       "Generate G-code"}
+    RibbonGroup gen{"Generate", {
+        {IDM_MACHINE_GEN_POCKET,  "2D Pocket",  "Generate a dynamic 2D pocket toolpath"},
+        {IDM_MACHINE_GEN_CONTOUR, "2D Contour", "Generate a dynamic 2D contour toolpath"}
     }};
+    RibbonGroup ops{"Simulate", {
+        {IDM_MACHINE_BACKPLOT, "Backplot",    "Run backplot animation"},
+        {IDM_MACHINE_VERIFY,   "Verify",      "Run solid verify"},
+        {IDM_MACHINE_SIM,      "Machine Sim", "Run machine simulation"}
+    }};
+    RibbonGroup post{"Output", {
+        {IDM_MACHINE_POST,    "Post",    "Generate G-code (post-process)"},
+        {IDM_MACHINE_REGEN,   "Regen",   "Regenerate all toolpaths (F5)"},
+        {IDM_MACHINE_SUMMARY, "Summary", "Show machining time / length summary"}
+    }};
+    tab.groups.push_back(gen);
     tab.groups.push_back(ops);
+    tab.groups.push_back(post);
     addTab(tab);
 }
 
@@ -160,11 +171,11 @@ void RibbonUI::buildViewTab() {
     RibbonTab tab;
     tab.name = "View";
     RibbonGroup mode{"Display", {
-        {IDM_VIEW_WIREFRAME, "Wireframe", "Wireframe display"},
-        {IDM_VIEW_SHADED,    "Shaded",    "Shaded display"},
+        {IDM_VIEW_WIREFRAME, "Wireframe",  "Wireframe display"},
+        {IDM_VIEW_SHADED,    "Shaded",     "Shaded display"},
         {IDM_VIEW_TRANSLU,   "Translucent","Translucent display"}
     }};
-    RibbonGroup view{"View Direction", {
+    RibbonGroup view{"Viewpoint", {
         {IDM_VIEW_ISOMETRIC, "ISO",    "Isometric view"},
         {IDM_VIEW_TOP,       "Top",    "Top view"},
         {IDM_VIEW_FRONT,     "Front",  "Front view"},
