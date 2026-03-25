@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <memory>
 #include "simulation/Verify.h"
+#include "cad/BRep.h"
 
 // Forward declarations
 class RibbonUI;
@@ -131,6 +132,44 @@ private:
     void runBackplot();
     void runMachineSim();
     void toggleCopilotPanel();
+
+    // --- Solid creation (Solids tab) ---
+    void createSolidBox();        // IDM_SOLID_EXTRUDE: box via parameter dialog
+    void createSolidCylinder();   // IDM_SOLID_REVOLVE: cylinder via parameter dialog
+    void solidBooleanOp(int commandId); // Union / Subtract / Intersect
+
+    // --- Wireframe primitive creation (Wireframe tab) ---
+    void createWireframe(int commandId);
+
+    // --- Model Prep commands (Model Prep tab) ---
+    void prepHeal();          // Heal gaps on active solid
+    void prepRemoveFillet();  // Remove small fillets from active solid
+    void prepBoundaries();    // Extract boundary curves from active solid
+    void prepClassify();      // Classify features on active solid
+    void prepAnalyse();       // Run model analysis / draft check
+    void prepSplit();         // Split solid at active work plane
+
+    // --- Project serialisation (CAMX format) ---
+    void loadProjectCamx(const std::wstring& path);
+    void saveProjectCamx(const std::wstring& path);
+
+    // --- Input dialog helpers ---
+    // Show a one-value prompt; returns true if the user clicked OK.
+    bool promptSingle(const wchar_t* title,
+                      const wchar_t* label,
+                      double defaultVal, double& outVal);
+    // Show a two-value prompt (e.g. radius + height).
+    bool promptDouble2(const wchar_t* title,
+                       const wchar_t* label1, double defVal1, double& out1,
+                       const wchar_t* label2, double defVal2, double& out2);
+    // Show a three-value prompt (e.g. dx, dy, dz for a box).
+    bool promptTriple(const wchar_t* title,
+                      const wchar_t* label1, double defVal1, double& out1,
+                      const wchar_t* label2, double defVal2, double& out2,
+                      const wchar_t* label3, double defVal3, double& out3);
+
+    // Return a pointer to the most recently added (active) solid, or nullptr.
+    BRep::Solid* activeSolid();
 
     // Window/controls
     HWND                              m_hwnd          = nullptr;
