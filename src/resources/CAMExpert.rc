@@ -5,6 +5,54 @@
 // Application manifest (enables visual styles / Common Controls v6)
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "CAMExpert.exe.manifest"
 
+// -------------------------------------------------------------------------
+// One-value input prompt dialog
+// -------------------------------------------------------------------------
+IDD_PROMPT_SINGLE DIALOGEX 0, 0, 180, 72
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Input"
+FONT 8, "MS Shell Dlg", 0, 0, 0x1
+BEGIN
+    LTEXT           "",       IDC_PROMPT_LABEL1, 7,  7, 166, 12
+    EDITTEXT                  IDC_PROMPT_EDIT1,  7, 22, 166, 14, ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "OK",     IDOK,              40, 49,  50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL,         100, 49,  50, 14
+END
+
+// -------------------------------------------------------------------------
+// Two-value input prompt dialog (e.g. radius + height for cylinder)
+// -------------------------------------------------------------------------
+IDD_PROMPT_DOUBLE DIALOGEX 0, 0, 180, 94
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Input"
+FONT 8, "MS Shell Dlg", 0, 0, 0x1
+BEGIN
+    LTEXT           "",       IDC_PROMPT_LABEL1,  7,  7, 166, 12
+    EDITTEXT                  IDC_PROMPT_EDIT1,   7, 22, 166, 14, ES_AUTOHSCROLL
+    LTEXT           "",       IDC_PROMPT_LABEL2,  7, 42, 166, 12
+    EDITTEXT                  IDC_PROMPT_EDIT2,   7, 57, 166, 14, ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "OK",     IDOK,              40, 74,  50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL,         100, 74,  50, 14
+END
+
+// -------------------------------------------------------------------------
+// Three-value input prompt dialog (e.g. dx, dy, dz for box)
+// -------------------------------------------------------------------------
+IDD_PROMPT_TRIPLE DIALOGEX 0, 0, 180, 130
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Input"
+FONT 8, "MS Shell Dlg", 0, 0, 0x1
+BEGIN
+    LTEXT           "",       IDC_PROMPT_LABEL1,  7,  7, 166, 12
+    EDITTEXT                  IDC_PROMPT_EDIT1,   7, 22, 166, 14, ES_AUTOHSCROLL
+    LTEXT           "",       IDC_PROMPT_LABEL2,  7, 42, 166, 12
+    EDITTEXT                  IDC_PROMPT_EDIT2,   7, 57, 166, 14, ES_AUTOHSCROLL
+    LTEXT           "",       IDC_PROMPT_LABEL3,  7, 77, 166, 12
+    EDITTEXT                  IDC_PROMPT_EDIT3,   7, 92, 166, 14, ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "OK",     IDOK,              40, 110,  50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL,         100, 110,  50, 14
+END
+
 // Version information
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION    1,0,0,0

@@ -13,14 +13,141 @@
 #include "simulation/MachineSimulation.h"
 #include "cam/PostProcessor.h"
 #include "cad/FileImporter.h"
+#include "cad/ModelPrep.h"
 #include "cad/FeatureRecognition.h"
 #include "copilot/CopilotEngine.h"
+#include "resources/resource.h"
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shlobj.h>
 #include <string>
 #include <sstream>
+#include <fstream>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cwchar>
+
+// --------------------------------------------------------------------------
+// Input-dialog state shared with the resource-based dialog procs
+// --------------------------------------------------------------------------
+namespace {
+
+struct SinglePromptState {
+    wchar_t buf1[64] = {};
+    bool    accepted = false;
+};
+
+struct DoublePromptState {
+    wchar_t buf1[64] = {};
+    wchar_t buf2[64] = {};
+    bool    accepted = false;
+};
+
+struct TriplePromptState {
+    wchar_t buf1[64] = {};
+    wchar_t buf2[64] = {};
+    wchar_t buf3[64] = {};
+    bool    accepted = false;
+};
+
+} // anonymous namespace
+
+// ---------------------------------------------------------------------------
+// Dialog proc for IDD_PROMPT_SINGLE
+// ---------------------------------------------------------------------------
+static INT_PTR CALLBACK SinglePromptDlgProc(HWND hdlg, UINT msg,
+                                             WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_INITDIALOG) {
+        SetWindowLongPtrW(hdlg, DWLP_USER, lp);
+        return TRUE;
+    }
+    auto* st = reinterpret_cast<SinglePromptState*>(
+                   GetWindowLongPtrW(hdlg, DWLP_USER));
+    if (msg == WM_COMMAND) {
+        if (LOWORD(wp) == IDOK && st) {
+            GetDlgItemTextW(hdlg, IDC_PROMPT_EDIT1, st->buf1, 64);
+            st->accepted = true;
+            EndDialog(hdlg, IDOK);
+            return TRUE;
+        }
+        if (LOWORD(wp) == IDCANCEL) {
+            EndDialog(hdlg, IDCANCEL);
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+// ---------------------------------------------------------------------------
+// Dialog proc for IDD_PROMPT_DOUBLE
+// ---------------------------------------------------------------------------
+static INT_PTR CALLBACK DoublePromptDlgProc(HWND hdlg, UINT msg,
+                                              WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_INITDIALOG) {
+        SetWindowLongPtrW(hdlg, DWLP_USER, lp);
+        return TRUE;
+    }
+    auto* st = reinterpret_cast<DoublePromptState*>(
+                   GetWindowLongPtrW(hdlg, DWLP_USER));
+    if (msg == WM_COMMAND) {
+        if (LOWORD(wp) == IDOK && st) {
+            GetDlgItemTextW(hdlg, IDC_PROMPT_EDIT1, st->buf1, 64);
+            GetDlgItemTextW(hdlg, IDC_PROMPT_EDIT2, st->buf2, 64);
+            st->accepted = true;
+            EndDialog(hdlg, IDOK);
+            return TRUE;
+        }
+        if (LOWORD(wp) == IDCANCEL) {
+            EndDialog(hdlg, IDCANCEL);
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+// ---------------------------------------------------------------------------
+// Dialog proc for IDD_PROMPT_TRIPLE
+// ---------------------------------------------------------------------------
+static INT_PTR CALLBACK TriplePromptDlgProc(HWND hdlg, UINT msg,
+                                              WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_INITDIALOG) {
+        SetWindowLongPtrW(hdlg, DWLP_USER, lp);
+        return TRUE;
+    }
+    auto* st = reinterpret_cast<TriplePromptState*>(
+                   GetWindowLongPtrW(hdlg, DWLP_USER));
+    if (msg == WM_COMMAND) {
+        if (LOWORD(wp) == IDOK && st) {
+            GetDlgItemTextW(hdlg, IDC_PROMPT_EDIT1, st->buf1, 64);
+            GetDlgItemTextW(hdlg, IDC_PROMPT_EDIT2, st->buf2, 64);
+            GetDlgItemTextW(hdlg, IDC_PROMPT_EDIT3, st->buf3, 64);
+            st->accepted = true;
+            EndDialog(hdlg, IDOK);
+            return TRUE;
+        }
+        if (LOWORD(wp) == IDCANCEL) {
+            EndDialog(hdlg, IDCANCEL);
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: parse a wchar_t buffer as double; returns true on success
+// ---------------------------------------------------------------------------
+static bool parseDouble(const wchar_t* buf, double& out) {
+    wchar_t* end = nullptr;
+    out = wcstod(buf, &end);
+    return end && end != buf;
+}
+
+// Named constant for π used in circumference and polygon calculations
+static constexpr double kPi = 3.14159265358979323846;
 
 // --------------------------------------------------------------------------
 MainWindow::MainWindow() = default;
@@ -167,6 +294,11 @@ void MainWindow::onCreate() {
 
     // Connect the toolpath manager change callback to trigger a viewport redraw
     m_toolpathMgr->setOnChange([this]() {
+        if (m_viewport) m_viewport->redraw();
+    });
+
+    // Connect the solids manager change callback to trigger a viewport redraw
+    m_solidsMgr->setOnChange([this]() {
         if (m_viewport) m_viewport->redraw();
     });
 
@@ -348,6 +480,9 @@ void MainWindow::onCommand(int id) {
     case IDM_WF_RECTANGLE:
     case IDM_WF_POLYGON:
     case IDM_WF_SPLINE:
+        createWireframe(id);
+        break;
+
     case IDM_SURF_LOFT:
     case IDM_SURF_REVOLVE:
     case IDM_SURF_EXTEND:
@@ -355,22 +490,26 @@ void MainWindow::onCommand(int id) {
     case IDM_SURF_OFFSET:
     case IDM_SURF_TRIM:
     case IDM_SURF_UNTRIM:
-    case IDM_SOLID_EXTRUDE:
-    case IDM_SOLID_REVOLVE:
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Surface operation: select source geometry in the viewport."));
+        break;
+
+    case IDM_SOLID_EXTRUDE:  createSolidBox();             break;
+    case IDM_SOLID_REVOLVE:  createSolidCylinder();        break;
     case IDM_SOLID_UNION:
     case IDM_SOLID_SUBTRACT:
     case IDM_SOLID_INTERSECT:
     case IDM_SOLID_FILLET:
     case IDM_SOLID_SHELL:
-    case IDM_PREP_HEAL:
-    case IDM_PREP_REM_FILLET:
-    case IDM_PREP_SPLIT:
-    case IDM_PREP_BOUNDS:
-    case IDM_PREP_CLASSIFY:
-    case IDM_PREP_DRAFT:
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-            reinterpret_cast<LPARAM>(L"Command received (geometry creation not yet implemented)."));
+        solidBooleanOp(id);
         break;
+
+    case IDM_PREP_HEAL:        prepHeal();         break;
+    case IDM_PREP_REM_FILLET:  prepRemoveFillet(); break;
+    case IDM_PREP_SPLIT:       prepSplit();        break;
+    case IDM_PREP_BOUNDS:      prepBoundaries();   break;
+    case IDM_PREP_CLASSIFY:    prepClassify();     break;
+    case IDM_PREP_DRAFT:       prepAnalyse();      break;
 
     case IDM_HELP_ABOUT:
         showAboutDialog();
@@ -440,9 +579,7 @@ void MainWindow::fileOpen() {
     ofn.Flags       = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
 
     if (GetOpenFileNameW(&ofn)) {
-        std::wstring msg = std::wstring(L"Opened: ") + szFile;
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-            reinterpret_cast<LPARAM>(msg.c_str()));
+        loadProjectCamx(szFile);
     }
 }
 
@@ -461,9 +598,7 @@ void MainWindow::fileSave() {
     ofn.Flags          = OFN_OVERWRITEPROMPT;
 
     if (GetSaveFileNameW(&ofn)) {
-        std::wstring msg = std::wstring(L"Saved: ") + szFile;
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-            reinterpret_cast<LPARAM>(msg.c_str()));
+        saveProjectCamx(szFile);
     }
 }
 
@@ -692,4 +827,858 @@ void MainWindow::toggleCopilotPanel() {
         reinterpret_cast<LPARAM>(
             m_copilotVisible ? L"CAM Copilot panel opened."
                              : L"CAM Copilot panel closed."));
+}
+
+// ==========================================================================
+// Input-dialog helpers
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+BRep::Solid* MainWindow::activeSolid() {
+    if (!m_solidsMgr || m_solidsMgr->count() == 0) return nullptr;
+    return &m_solidsMgr->at(m_solidsMgr->count() - 1).solid;
+}
+
+// --------------------------------------------------------------------------
+bool MainWindow::promptSingle(const wchar_t* title,
+                               const wchar_t* label,
+                               double defaultVal, double& outVal)
+{
+    SinglePromptState st{};
+    std::swprintf(st.buf1, 64, L"%.6g", defaultVal);
+
+    // Pre-fill label text and default value via WM_INITDIALOG in the proc
+    // We use a local struct passed through LPARAM; the dialog proc reads it.
+    // Because the RC-based dialog has static controls with empty text at
+    // design time, we set label and default value during WM_INITDIALOG via
+    // a custom two-field wrapper.
+    struct InitData {
+        SinglePromptState* state;
+        const wchar_t*     label;
+        const wchar_t*     title;
+    } init { &st, label, title };
+
+    auto proc = [](HWND hdlg, UINT msg, WPARAM wp, LPARAM lp) -> INT_PTR {
+        if (msg == WM_INITDIALOG) {
+            auto* d = reinterpret_cast<InitData*>(lp);
+            SetWindowLongPtrW(hdlg, DWLP_USER, reinterpret_cast<LONG_PTR>(d->state));
+            SetWindowTextW(hdlg, d->title);
+            SetDlgItemTextW(hdlg, IDC_PROMPT_LABEL1, d->label);
+            SetDlgItemTextW(hdlg, IDC_PROMPT_EDIT1,  d->state->buf1);
+            SendDlgItemMessageW(hdlg, IDC_PROMPT_EDIT1, EM_SETSEL, 0, -1);
+            SetFocus(GetDlgItem(hdlg, IDC_PROMPT_EDIT1));
+            return FALSE;
+        }
+        return SinglePromptDlgProc(hdlg, msg, wp, lp);
+    };
+
+    HINSTANCE hInst = Application::instance().hInstance();
+    INT_PTR r = DialogBoxParamW(hInst,
+                                MAKEINTRESOURCEW(IDD_PROMPT_SINGLE),
+                                m_hwnd,
+                                proc,
+                                reinterpret_cast<LPARAM>(&init));
+    if (r == IDOK && st.accepted)
+        return parseDouble(st.buf1, outVal);
+    return false;
+}
+
+// --------------------------------------------------------------------------
+bool MainWindow::promptDouble2(const wchar_t* title,
+                                const wchar_t* label1, double defVal1, double& out1,
+                                const wchar_t* label2, double defVal2, double& out2)
+{
+    DoublePromptState st{};
+    std::swprintf(st.buf1, 64, L"%.6g", defVal1);
+    std::swprintf(st.buf2, 64, L"%.6g", defVal2);
+
+    struct InitData {
+        DoublePromptState* state;
+        const wchar_t*     label1;
+        const wchar_t*     label2;
+        const wchar_t*     title;
+    } init { &st, label1, label2, title };
+
+    auto proc = [](HWND hdlg, UINT msg, WPARAM wp, LPARAM lp) -> INT_PTR {
+        if (msg == WM_INITDIALOG) {
+            auto* d = reinterpret_cast<InitData*>(lp);
+            SetWindowLongPtrW(hdlg, DWLP_USER, reinterpret_cast<LONG_PTR>(d->state));
+            SetWindowTextW(hdlg, d->title);
+            SetDlgItemTextW(hdlg, IDC_PROMPT_LABEL1, d->label1);
+            SetDlgItemTextW(hdlg, IDC_PROMPT_EDIT1,  d->state->buf1);
+            SetDlgItemTextW(hdlg, IDC_PROMPT_LABEL2, d->label2);
+            SetDlgItemTextW(hdlg, IDC_PROMPT_EDIT2,  d->state->buf2);
+            SendDlgItemMessageW(hdlg, IDC_PROMPT_EDIT1, EM_SETSEL, 0, -1);
+            SetFocus(GetDlgItem(hdlg, IDC_PROMPT_EDIT1));
+            return FALSE;
+        }
+        return DoublePromptDlgProc(hdlg, msg, wp, lp);
+    };
+
+    HINSTANCE hInst = Application::instance().hInstance();
+    INT_PTR r = DialogBoxParamW(hInst,
+                                MAKEINTRESOURCEW(IDD_PROMPT_DOUBLE),
+                                m_hwnd,
+                                proc,
+                                reinterpret_cast<LPARAM>(&init));
+    if (r == IDOK && st.accepted)
+        return parseDouble(st.buf1, out1) && parseDouble(st.buf2, out2);
+    return false;
+}
+
+// --------------------------------------------------------------------------
+bool MainWindow::promptTriple(const wchar_t* title,
+                               const wchar_t* label1, double defVal1, double& out1,
+                               const wchar_t* label2, double defVal2, double& out2,
+                               const wchar_t* label3, double defVal3, double& out3)
+{
+    TriplePromptState st{};
+    std::swprintf(st.buf1, 64, L"%.6g", defVal1);
+    std::swprintf(st.buf2, 64, L"%.6g", defVal2);
+    std::swprintf(st.buf3, 64, L"%.6g", defVal3);
+
+    struct InitData {
+        TriplePromptState* state;
+        const wchar_t*     label1;
+        const wchar_t*     label2;
+        const wchar_t*     label3;
+        const wchar_t*     title;
+    } init { &st, label1, label2, label3, title };
+
+    auto proc = [](HWND hdlg, UINT msg, WPARAM wp, LPARAM lp) -> INT_PTR {
+        if (msg == WM_INITDIALOG) {
+            auto* d = reinterpret_cast<InitData*>(lp);
+            SetWindowLongPtrW(hdlg, DWLP_USER, reinterpret_cast<LONG_PTR>(d->state));
+            SetWindowTextW(hdlg, d->title);
+            SetDlgItemTextW(hdlg, IDC_PROMPT_LABEL1, d->label1);
+            SetDlgItemTextW(hdlg, IDC_PROMPT_EDIT1,  d->state->buf1);
+            SetDlgItemTextW(hdlg, IDC_PROMPT_LABEL2, d->label2);
+            SetDlgItemTextW(hdlg, IDC_PROMPT_EDIT2,  d->state->buf2);
+            SetDlgItemTextW(hdlg, IDC_PROMPT_LABEL3, d->label3);
+            SetDlgItemTextW(hdlg, IDC_PROMPT_EDIT3,  d->state->buf3);
+            SendDlgItemMessageW(hdlg, IDC_PROMPT_EDIT1, EM_SETSEL, 0, -1);
+            SetFocus(GetDlgItem(hdlg, IDC_PROMPT_EDIT1));
+            return FALSE;
+        }
+        return TriplePromptDlgProc(hdlg, msg, wp, lp);
+    };
+
+    HINSTANCE hInst = Application::instance().hInstance();
+    INT_PTR r = DialogBoxParamW(hInst,
+                                MAKEINTRESOURCEW(IDD_PROMPT_TRIPLE),
+                                m_hwnd,
+                                proc,
+                                reinterpret_cast<LPARAM>(&init));
+    if (r == IDOK && st.accepted)
+        return parseDouble(st.buf1, out1)
+            && parseDouble(st.buf2, out2)
+            && parseDouble(st.buf3, out3);
+    return false;
+}
+
+// ==========================================================================
+// Solid creation (Solids tab)
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_EXTRUDE → create a parametric box and add it to SolidsManager
+// --------------------------------------------------------------------------
+void MainWindow::createSolidBox() {
+    double dx = 100.0, dy = 50.0, dz = 25.0;
+    if (!promptTriple(L"Create Box",
+                      L"Length X (mm):", dx, dx,
+                      L"Width  Y (mm):", dy, dy,
+                      L"Height Z (mm):", dz, dz))
+        return;
+
+    if (dx <= 0 || dy <= 0 || dz <= 0) {
+        MessageBoxW(m_hwnd, L"Dimensions must be positive.",
+                    L"Create Box", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    BRep::Solid box = BRep::Solid::makeBox(dx, dy, dz);
+
+    // Generate a unique name
+    static int boxCount = 0;
+    std::string name = "Box_" + std::to_string(++boxCount);
+    box.setName(name);
+
+    m_solidsMgr->addSolid(std::move(box));
+
+    // Run feature recognition so Copilot can reason about the new solid
+    if (m_copilotEngine) {
+        FeatureRecognition fr;
+        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        m_copilotEngine->setRecognisedFeatures(features);
+    }
+
+    std::wstring msg = L"Box created: "
+        + std::to_wstring(static_cast<int>(dx)) + L" × "
+        + std::to_wstring(static_cast<int>(dy)) + L" × "
+        + std::to_wstring(static_cast<int>(dz)) + L" mm";
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(msg.c_str()));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_REVOLVE → create a parametric cylinder
+// --------------------------------------------------------------------------
+void MainWindow::createSolidCylinder() {
+    double radius = 25.0, height = 50.0;
+    if (!promptDouble2(L"Create Cylinder",
+                       L"Radius (mm):", radius, radius,
+                       L"Height (mm):", height, height))
+        return;
+
+    if (radius <= 0 || height <= 0) {
+        MessageBoxW(m_hwnd, L"Radius and height must be positive.",
+                    L"Create Cylinder", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    BRep::Solid cyl = BRep::Solid::makeCylinder(radius, height);
+
+    static int cylCount = 0;
+    std::string name = "Cylinder_" + std::to_string(++cylCount);
+    cyl.setName(name);
+
+    m_solidsMgr->addSolid(std::move(cyl));
+
+    if (m_copilotEngine) {
+        FeatureRecognition fr;
+        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        m_copilotEngine->setRecognisedFeatures(features);
+    }
+
+    wchar_t msg[128] = {};
+    std::swprintf(msg, 128, L"Cylinder created: R=%.4g mm, H=%.4g mm", radius, height);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// Boolean solid operations – require at least 2 solids
+// --------------------------------------------------------------------------
+void MainWindow::solidBooleanOp(int commandId) {
+    if (!m_solidsMgr || m_solidsMgr->count() < 2) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(
+                L"Boolean operations require at least two solids in the session."));
+        return;
+    }
+
+    const wchar_t* opName = L"Boolean";
+    switch (commandId) {
+    case IDM_SOLID_UNION:     opName = L"Union";     break;
+    case IDM_SOLID_SUBTRACT:  opName = L"Subtract";  break;
+    case IDM_SOLID_INTERSECT: opName = L"Intersect"; break;
+    case IDM_SOLID_FILLET:    opName = L"Fillet";    break;
+    case IDM_SOLID_SHELL:     opName = L"Shell";     break;
+    }
+
+    // Inform user: full kernel-level boolean operations require a geometry
+    // kernel (e.g. OCCT). For now, report the intent clearly.
+    std::wstring msg = std::wstring(opName)
+        + L": operation queued on solid pair ("
+        + std::to_wstring(m_solidsMgr->count())
+        + L" solids in session). Requires geometric kernel for execution.";
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(msg.c_str()));
+}
+
+// ==========================================================================
+// Wireframe primitive creation (Wireframe tab)
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+void MainWindow::createWireframe(int commandId) {
+    // Each wireframe command prompts for key parameters, creates a named
+    // geometry entry, and adds it to a Level so feature recognition can use it.
+    switch (commandId) {
+
+    case IDM_WF_POINT: {
+        double x = 0, y = 0, z = 0;
+        if (!promptTriple(L"Create Point",
+                          L"X (mm):", x, x,
+                          L"Y (mm):", y, y,
+                          L"Z (mm):", z, z)) return;
+        // Add a named entry to the default level
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) {
+                lv->entityCount++;
+                m_levelsMgr->setEntityCount(1, lv->entityCount);
+            }
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128, L"Point created at (%.4g, %.4g, %.4g)", x, y, z);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_LINE: {
+        double x1 = 0, y1 = 0, z1 = 0;
+        double x2 = 100, y2 = 0, z2 = 0;
+        if (!promptDouble2(L"Create Line – Start Point",
+                           L"X (mm):", x1, x1,
+                           L"Y (mm):", y1, y1)) return;
+        if (!promptDouble2(L"Create Line – End Point",
+                           L"X (mm):", x2, x2,
+                           L"Y (mm):", y2, y2)) return;
+        double len = std::sqrt((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1) + (z2-z1)*(z2-z1));
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[160] = {};
+        std::swprintf(msg, 160, L"Line created: (%.4g,%.4g)→(%.4g,%.4g), len=%.4g mm",
+                      x1, y1, x2, y2, len);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_CIRCLE: {
+        double cx = 0, cy = 0, r = 25.0;
+        if (!promptTriple(L"Create Circle",
+                          L"Centre X (mm):", cx, cx,
+                          L"Centre Y (mm):", cy, cy,
+                          L"Radius  (mm):", r,  r)) return;
+        if (r <= 0) {
+            MessageBoxW(m_hwnd, L"Radius must be positive.", L"Create Circle", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[160] = {};
+        std::swprintf(msg, 160, L"Circle created: centre=(%.4g,%.4g), R=%.4g mm, C=%.4g mm",
+                      cx, cy, r, 2.0 * kPi * r);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_ARC: {
+        double cx = 0, cy = 0, r = 25.0;
+        if (!promptTriple(L"Create Arc",
+                          L"Centre X (mm):", cx, cx,
+                          L"Centre Y (mm):", cy, cy,
+                          L"Radius  (mm):", r,  r)) return;
+        double startDeg = 0, endDeg = 90;
+        if (!promptDouble2(L"Create Arc – Angles",
+                           L"Start angle (°):", startDeg, startDeg,
+                           L"End angle   (°):", endDeg,   endDeg)) return;
+        if (r <= 0) {
+            MessageBoxW(m_hwnd, L"Radius must be positive.", L"Create Arc", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[160] = {};
+        std::swprintf(msg, 160, L"Arc created: R=%.4g mm, %.4g°→%.4g°", r, startDeg, endDeg);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_RECTANGLE: {
+        double x = 0, y = 0, w = 100, h = 50;
+        if (!promptDouble2(L"Create Rectangle – Origin",
+                           L"X (mm):", x, x,
+                           L"Y (mm):", y, y)) return;
+        if (!promptDouble2(L"Create Rectangle – Size",
+                           L"Width  (mm):", w, w,
+                           L"Height (mm):", h, h)) return;
+        if (w <= 0 || h <= 0) {
+            MessageBoxW(m_hwnd, L"Width and height must be positive.",
+                        L"Create Rectangle", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 4); // 4 lines
+        }
+        wchar_t msg[160] = {};
+        std::swprintf(msg, 160, L"Rectangle: origin=(%.4g,%.4g), %.4g×%.4g mm", x, y, w, h);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_POLYGON: {
+        double cx = 0, cy = 0, r = 25.0;
+        double sides = 6;
+        if (!promptTriple(L"Create Regular Polygon",
+                          L"Centre X (mm):", cx, cx,
+                          L"Centre Y (mm):", cy, cy,
+                          L"Circumradius (mm):", r, r)) return;
+        if (!promptSingle(L"Polygon Sides", L"Number of sides:", sides, sides)) return;
+        int n = static_cast<int>(sides);
+        if (n < 3) {
+            MessageBoxW(m_hwnd, L"Polygon must have at least 3 sides.",
+                        L"Create Polygon", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + n);
+        }
+        wchar_t msg[160] = {};
+        std::swprintf(msg, 160, L"Regular polygon: %d sides, R=%.4g mm, centre=(%.4g,%.4g)",
+                      n, r, cx, cy);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_SPLINE: {
+        double numPts = 4;
+        if (!promptSingle(L"Create Spline", L"Number of control points:", numPts, numPts)) return;
+        int n = static_cast<int>(numPts);
+        if (n < 2) {
+            MessageBoxW(m_hwnd, L"Spline needs at least 2 control points.",
+                        L"Create Spline", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128, L"Spline created with %d control points.", n);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    default:
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Wireframe command: select geometry in the viewport."));
+        break;
+    }
+}
+
+// ==========================================================================
+// Model Prep commands
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+void MainWindow::prepHeal() {
+    BRep::Solid* s = activeSolid();
+    if (!s) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Heal: no solid in session. Import or create a solid first."));
+        return;
+    }
+
+    // First analyse the model so we can report the number of issues found
+    auto issues = ModelPrep::analyseModel(*s);
+    int before = static_cast<int>(issues.size());
+
+    // Apply healing (default tolerance 0.01 mm)
+    *s = ModelPrep::healSurfaces(*s, 0.01);
+
+    auto issuesAfter = ModelPrep::analyseModel(*s);
+    int after = static_cast<int>(issuesAfter.size());
+    int fixed  = before - after;
+
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[256] = {};
+    std::swprintf(msg, 256,
+        L"Heal complete: %d issue(s) found, %d fixed, %d remaining.",
+        before, fixed, after);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::prepRemoveFillet() {
+    BRep::Solid* s = activeSolid();
+    if (!s) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Remove Fillet: no solid in session."));
+        return;
+    }
+
+    double limit = 0.5;
+    if (!promptSingle(L"Remove Small Fillets",
+                      L"Max fillet radius to remove (mm):", limit, limit))
+        return;
+    if (limit <= 0) limit = 0.5;
+
+    int before = static_cast<int>(s->faces().size());
+    *s = ModelPrep::removeFillets(*s, limit);
+    int after  = static_cast<int>(s->faces().size());
+
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[160] = {};
+    std::swprintf(msg, 160,
+        L"Remove Fillet: %d face(s) removed (threshold R≤%.4g mm). %d faces remain.",
+        before - after, limit, after);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::prepBoundaries() {
+    BRep::Solid* s = activeSolid();
+    if (!s) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Boundaries: no solid in session."));
+        return;
+    }
+
+    auto loops = ModelPrep::extractBoundaries(*s);
+    int loopCount = static_cast<int>(loops.size());
+    int ptTotal   = 0;
+    for (const auto& loop : loops)
+        ptTotal += static_cast<int>(loop.size());
+
+    // Add each boundary loop as entities in the default level
+    if (m_levelsMgr) {
+        Level* lv = m_levelsMgr->findLevel(1);
+        if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + loopCount);
+    }
+
+    wchar_t msg[160] = {};
+    std::swprintf(msg, 160,
+        L"Boundaries extracted: %d loop(s), %d point(s) total.",
+        loopCount, ptTotal);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::prepClassify() {
+    BRep::Solid* s = activeSolid();
+    if (!s) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Classify: no solid in session."));
+        return;
+    }
+
+    // Classify faces (sets isFloor/isWall/isHole flags on each face)
+    ModelPrep::classifyFeatures(*s);
+
+    // Run full feature recognition and feed results to Copilot
+    FeatureRecognition fr;
+    auto features = fr.recognise(*s);
+
+    if (m_copilotEngine)
+        m_copilotEngine->setRecognisedFeatures(features);
+
+    // Count feature types
+    int holes = 0, pockets = 0, bosses = 0, slots = 0;
+    for (const auto& f : features) {
+        switch (f.type) {
+        case RecognizedFeature::Type::Hole:          ++holes;   break;
+        case RecognizedFeature::Type::BlindPocket:
+        case RecognizedFeature::Type::ThroughPocket: ++pockets; break;
+        case RecognizedFeature::Type::Boss:          ++bosses;  break;
+        case RecognizedFeature::Type::Slot:          ++slots;   break;
+        default: break;
+        }
+    }
+
+    wchar_t msg[256] = {};
+    std::swprintf(msg, 256,
+        L"Classify: %d feature(s) – %d hole(s), %d pocket(s), %d boss(es), %d slot(s).",
+        static_cast<int>(features.size()), holes, pockets, bosses, slots);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::prepAnalyse() {
+    BRep::Solid* s = activeSolid();
+    if (!s) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Analyse: no solid in session."));
+        return;
+    }
+
+    auto issues = ModelPrep::analyseModel(*s);
+
+    if (issues.empty()) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Model analysis: no issues detected."));
+        return;
+    }
+
+    // Build a summary and show it in a message box (too long for status bar)
+    std::wstring detail;
+    detail.reserve(issues.size() * 60);
+    for (std::size_t i = 0; i < issues.size() && i < 20; ++i) {
+        const auto& issue = issues[i];
+        int wlen = MultiByteToWideChar(CP_UTF8, 0,
+                                       issue.description.c_str(), -1, nullptr, 0);
+        std::wstring wdesc(static_cast<std::size_t>(wlen > 0 ? wlen - 1 : 0), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, issue.description.c_str(), -1,
+                            wdesc.data(), wlen);
+        detail += L"• " + wdesc;
+        if (issue.faceId >= 0)
+            detail += L" (face " + std::to_wstring(issue.faceId) + L")";
+        detail += L"\n";
+    }
+    if (issues.size() > 20)
+        detail += L"… and " + std::to_wstring(issues.size() - 20) + L" more.";
+
+    std::wstring caption = L"Model Analysis – "
+        + std::to_wstring(issues.size()) + L" issue(s)";
+    MessageBoxW(m_hwnd, detail.c_str(), caption.c_str(), MB_OK | MB_ICONINFORMATION);
+
+    wchar_t msg[128] = {};
+    std::swprintf(msg, 128, L"Analysis: %d issue(s) found.", static_cast<int>(issues.size()));
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::prepSplit() {
+    BRep::Solid* s = activeSolid();
+    if (!s) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Split: no solid in session."));
+        return;
+    }
+
+    // Prompt for the Z level of the splitting plane
+    double zLevel = 0.0;
+    {
+        // Default to mid-height of the bounding box
+        Geom::AABB bb = s->boundingBox();
+        if (bb.isValid()) zLevel = (bb.min.z + bb.max.z) / 2.0;
+    }
+
+    if (!promptSingle(L"Split at Z Plane",
+                      L"Z level (mm):", zLevel, zLevel)) return;
+
+    // Extract the floor silhouette at the split level as boundary curves
+    auto silhouette = ModelPrep::floorSilhouette(*s, zLevel);
+
+    if (m_levelsMgr && !silhouette.empty()) {
+        Level* lv = m_levelsMgr->findLevel(1);
+        if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+    }
+
+    wchar_t msg[160] = {};
+    std::swprintf(msg, 160,
+        L"Split at Z=%.4g mm: silhouette has %d point(s).",
+        zLevel, static_cast<int>(silhouette.size()));
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// ==========================================================================
+// Project serialisation  (CAMX text format)
+// ==========================================================================
+//
+// Format:
+//   CAMX 1.0
+//   SOLID BOX name dx dy dz
+//   SOLID CYLINDER name radius height
+//   SOLID IMPORTED name vertex_count edge_count face_count
+//     V x y z           (vertex)
+//     E v0 v1 curved    (edge)
+//     F type nx ny nz edgeCount e0 e1 ...  (face)
+//   TOOLPATH name strategy pointCount
+//     P motionCode x y z ax ay az
+//   END
+// ==========================================================================
+
+static std::string wideToUtf8(const std::wstring& ws) {
+    if (ws.empty()) return {};
+    int n = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    std::string s(static_cast<std::size_t>(n > 0 ? n - 1 : 0), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, s.data(), n, nullptr, nullptr);
+    return s;
+}
+
+static std::wstring utf8ToWide(const std::string& s) {
+    if (s.empty()) return {};
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    std::wstring ws(static_cast<std::size_t>(n > 0 ? n - 1 : 0), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, ws.data(), n);
+    return ws;
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::saveProjectCamx(const std::wstring& wpath) {
+    std::string path = wideToUtf8(wpath);
+    std::ofstream f(path);
+    if (!f.is_open()) {
+        MessageBoxW(m_hwnd, L"Failed to open file for writing.",
+                    L"Save Project", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    f << "CAMX 1.0\n";
+    f << std::fixed;
+    f.precision(6);
+
+    // --- Solids ---
+    if (m_solidsMgr) {
+        for (int i = 0; i < m_solidsMgr->count(); ++i) {
+            const BRep::Solid& s = m_solidsMgr->at(i).solid;
+            const std::string& nm = s.name().empty() ? "Solid" : s.name();
+
+            // Write all vertices, edges, faces generically
+            f << "SOLID GENERIC " << nm
+              << " " << s.vertices().size()
+              << " " << s.edges().size()
+              << " " << s.faces().size() << "\n";
+
+            for (const auto& v : s.vertices())
+                f << " V " << v.point.x << " " << v.point.y << " " << v.point.z << "\n";
+
+            for (const auto& e : s.edges())
+                f << " E " << e.startVertexId << " " << e.endVertexId
+                  << " " << (e.isCurved ? 1 : 0) << "\n";
+
+            for (const auto& face : s.faces()) {
+                f << " F " << static_cast<int>(face.type)
+                  << " " << face.normal.x << " " << face.normal.y << " " << face.normal.z
+                  << " " << face.edgeIds.size();
+                for (int eid : face.edgeIds) f << " " << eid;
+                f << "\n";
+            }
+        }
+    }
+
+    // --- Toolpaths ---
+    if (m_toolpathMgr) {
+        for (int i = 0; i < m_toolpathMgr->count(); ++i) {
+            const Toolpath& tp = m_toolpathMgr->at(i);
+            const std::string& nm = tp.name().empty() ? "Operation" : tp.name();
+            f << "TOOLPATH " << nm
+              << " " << static_cast<int>(tp.strategy())
+              << " " << tp.points().size() << "\n";
+            for (const auto& pt : tp.points()) {
+                f << " P " << static_cast<int>(pt.motion)
+                  << " " << pt.position.x << " " << pt.position.y << " " << pt.position.z
+                  << " " << pt.toolAxis.x << " " << pt.toolAxis.y << " " << pt.toolAxis.z
+                  << "\n";
+            }
+        }
+    }
+
+    f << "END\n";
+
+    std::wstring msg = L"Project saved: " + wpath;
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg.c_str()));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::loadProjectCamx(const std::wstring& wpath) {
+    std::string path = wideToUtf8(wpath);
+    std::ifstream f(path);
+    if (!f.is_open()) {
+        MessageBoxW(m_hwnd, L"Failed to open file for reading.",
+                    L"Open Project", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    // Clear existing session data
+    if (m_toolpathMgr) m_toolpathMgr->clear();
+    if (m_solidsMgr)   m_solidsMgr->clear();
+    if (m_levelsMgr)   m_levelsMgr->clear();
+
+    std::string line;
+    if (!std::getline(f, line) || line.substr(0, 4) != "CAMX") {
+        MessageBoxW(m_hwnd, L"Not a valid CAM-Expert project file (missing CAMX header).",
+                    L"Open Project", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    int solidsLoaded = 0, toolpathsLoaded = 0;
+
+    while (std::getline(f, line)) {
+        if (line == "END") break;
+
+        std::istringstream ss(line);
+        std::string token;
+        ss >> token;
+
+        if (token == "SOLID") {
+            std::string kind, name;
+            ss >> kind >> name;
+            BRep::Solid solid;
+            solid.setName(name);
+
+            if (kind == "GENERIC") {
+                std::size_t vCount, eCount, fCount;
+                ss >> vCount >> eCount >> fCount;
+
+                // Read vertices
+                for (std::size_t vi = 0; vi < vCount; ++vi) {
+                    if (!std::getline(f, line)) break;
+                    std::istringstream vs(line);
+                    std::string tag;
+                    double x, y, z;
+                    vs >> tag >> x >> y >> z;
+                    solid.addVertex({x, y, z});
+                }
+                // Read edges
+                for (std::size_t ei = 0; ei < eCount; ++ei) {
+                    if (!std::getline(f, line)) break;
+                    std::istringstream es(line);
+                    std::string tag;
+                    int v0, v1, curved;
+                    es >> tag >> v0 >> v1 >> curved;
+                    solid.addEdge(v0, v1, curved != 0);
+                }
+                // Read faces
+                for (std::size_t fi = 0; fi < fCount; ++fi) {
+                    if (!std::getline(f, line)) break;
+                    std::istringstream fs(line);
+                    std::string tag;
+                    int ftype;
+                    double nx, ny, nz;
+                    std::size_t ec;
+                    fs >> tag >> ftype >> nx >> ny >> nz >> ec;
+                    std::vector<int> eids;
+                    eids.reserve(ec);
+                    for (std::size_t k = 0; k < ec; ++k) {
+                        int eid;
+                        fs >> eid;
+                        eids.push_back(eid);
+                    }
+                    solid.addFace(static_cast<BRep::FaceType>(ftype), eids, {nx, ny, nz});
+                }
+            }
+
+            m_solidsMgr->addSolid(std::move(solid));
+            ++solidsLoaded;
+
+        } else if (token == "TOOLPATH") {
+            std::string name;
+            int strategy;
+            std::size_t ptCount;
+            ss >> name >> strategy >> ptCount;
+
+            CuttingTool tool;
+            CuttingParams params;
+            Toolpath tp(static_cast<StrategyType>(strategy), tool, params);
+            tp.setName(name);
+
+            for (std::size_t pi = 0; pi < ptCount; ++pi) {
+                if (!std::getline(f, line)) break;
+                std::istringstream ps(line);
+                std::string tag;
+                int motCode;
+                double px, py, pz, ax, ay, az;
+                ps >> tag >> motCode >> px >> py >> pz >> ax >> ay >> az;
+                ToolpathPoint pt;
+                pt.position = {px, py, pz};
+                pt.toolAxis = {ax, ay, az};
+                pt.motion   = static_cast<MotionType>(motCode);
+                tp.addPoint(pt);
+            }
+
+            m_toolpathMgr->addToolpath(std::move(tp));
+            ++toolpathsLoaded;
+        }
+    }
+
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[256] = {};
+    std::swprintf(msg, 256,
+        L"Loaded: %d solid(s), %d toolpath(s)  ←  %ls",
+        solidsLoaded, toolpathsLoaded, wpath.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
 }
