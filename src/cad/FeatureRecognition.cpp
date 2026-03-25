@@ -181,10 +181,45 @@ FeatureRecognition::findHoles(const BRep::Solid& solid) {
         RecognizedFeature f;
         f.type     = RecognizedFeature::Type::Hole;
         f.diameter = estimateCylinderDiameter(face, solid);
-        f.depth    = 10.0; // placeholder – would be computed from face height
+
+        // Compute hole depth from Z-range of the cylindrical face's boundary edges
+        {
+            double minZ =  1e30, maxZ = -1e30;
+            const auto& verts = solid.vertices();
+            const auto& edges = solid.edges();
+            for (int eid : face.edgeIds) {
+                if (eid < 0 || eid >= static_cast<int>(edges.size())) continue;
+                const auto& e = edges[static_cast<std::size_t>(eid)];
+                if (e.startVertexId >= 0 && e.startVertexId < static_cast<int>(verts.size()))
+                    { double z = verts[static_cast<std::size_t>(e.startVertexId)].point.z;
+                      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z; }
+                if (e.endVertexId >= 0 && e.endVertexId < static_cast<int>(verts.size()))
+                    { double z = verts[static_cast<std::size_t>(e.endVertexId)].point.z;
+                      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z; }
+            }
+            f.depth = (maxZ > minZ + 1e-6) ? (maxZ - minZ) : 10.0;
+        }
         f.axis     = face.normal.length() > 0.5
                     ? face.normal      // use face normal as approximate axis
                     : Geom::Vec3{0, 0, 1};
+
+        // Compute centroid from boundary edge midpoints
+        {
+            const auto& verts = solid.vertices();
+            const auto& edges = solid.edges();
+            Geom::Vec3 sum{};
+            int cnt = 0;
+            for (int eid : face.edgeIds) {
+                if (eid < 0 || eid >= static_cast<int>(edges.size())) continue;
+                const auto& e = edges[static_cast<std::size_t>(eid)];
+                if (e.startVertexId >= 0 && e.startVertexId < static_cast<int>(verts.size()))
+                    { sum = sum + verts[static_cast<std::size_t>(e.startVertexId)].point; ++cnt; }
+                if (e.endVertexId >= 0 && e.endVertexId < static_cast<int>(verts.size()))
+                    { sum = sum + verts[static_cast<std::size_t>(e.endVertexId)].point; ++cnt; }
+            }
+            if (cnt > 0) f.centre = sum * (1.0 / cnt);
+        }
+
         f.description = "Hole Ø" + std::to_string(f.diameter) + " mm";
         result.push_back(f);
     }
@@ -200,7 +235,27 @@ FeatureRecognition::findPockets(const BRep::Solid& solid) {
         RecognizedFeature f;
         f.type        = RecognizedFeature::Type::BlindPocket;
         f.floorFaceId = face.id;
-        f.depth       = 5.0; // placeholder
+
+        // Compute pocket depth: difference between bounding-box top Z of the
+        // solid and the Z coordinate of this floor face.
+        {
+            Geom::AABB bb = solid.boundingBox();
+            double floorZ = 1e30;
+            const auto& verts = solid.vertices();
+            const auto& edges = solid.edges();
+            for (int eid : face.edgeIds) {
+                if (eid < 0 || eid >= static_cast<int>(edges.size())) continue;
+                const auto& e = edges[static_cast<std::size_t>(eid)];
+                auto checkV = [&](int vid) {
+                    if (vid >= 0 && vid < static_cast<int>(verts.size()))
+                        floorZ = std::min(floorZ, verts[static_cast<std::size_t>(vid)].point.z);
+                };
+                checkV(e.startVertexId);
+                checkV(e.endVertexId);
+            }
+            double topZ = bb.isValid() ? bb.max.z : (floorZ + 5.0);
+            f.depth = (topZ > floorZ + 1e-6) ? (topZ - floorZ) : 5.0;
+        }
         f.description = "Blind pocket, floor face " + std::to_string(face.id);
         result.push_back(f);
     }
@@ -356,7 +411,27 @@ FeatureRecognition::findSlots(const BRep::Solid& solid) {
             RecognizedFeature feat;
             feat.type        = RecognizedFeature::Type::Slot;
             feat.width       = width;
-            feat.depth       = 5.0; // placeholder – computed from floor z vs. top z
+
+            // Compute slot depth: top of solid minus the floor Z level
+            {
+                Geom::AABB bb = solid.boundingBox();
+                double floorZ = 1e30;
+                for (const auto& face2 : faces) {
+                    if (!face2.isFloor) continue;
+                    for (int eid : face2.edgeIds) {
+                        if (eid < 0 || eid >= static_cast<int>(edges.size())) continue;
+                        const auto& e2 = edges[static_cast<std::size_t>(eid)];
+                        auto checkV = [&](int vid) {
+                            if (vid >= 0 && vid < static_cast<int>(verts.size()))
+                                floorZ = std::min(floorZ, verts[static_cast<std::size_t>(vid)].point.z);
+                        };
+                        checkV(e2.startVertexId);
+                        checkV(e2.endVertexId);
+                    }
+                }
+                double topZ = bb.isValid() ? bb.max.z : (floorZ + 5.0);
+                feat.depth = (floorZ < 1e29 && topZ > floorZ + 1e-6) ? (topZ - floorZ) : 5.0;
+            }
             feat.axis        = {0, 0, 1};
             feat.wallFaceIds = {w1->id, w2->id};
             feat.description = "Slot, width " + std::to_string(width).substr(0, 5)

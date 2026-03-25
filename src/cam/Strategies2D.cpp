@@ -374,3 +374,156 @@ Toolpath Strategies2D::drilling(const std::vector<Geom::Vec2>& holes,
     tp.markClean();
     return tp;
 }
+
+// --------------------------------------------------------------------------
+// chamfer – follow a 2-D profile with a chamfer tool so the conical flute
+// produces the desired edge break at the specified angle.
+//
+// The toolpath is positioned at:
+//   Z = -( chamferWidth / tan(chamferAngle_rad) )
+// relative to the top-of-stock, which causes the chamfer tool's cone to
+// create the requested width at the edge corner.  A single planar pass is
+// generated at this Z with lead-in / lead-out arcs.
+// --------------------------------------------------------------------------
+Toolpath Strategies2D::chamfer(const std::vector<Geom::Vec2>& profile,
+                                const ChamferParams& p,
+                                const CuttingTool& tool,
+                                const CuttingParams& cuts)
+{
+    Toolpath tp(StrategyType::Chamfer, tool, cuts);
+    if (profile.empty()) return tp;
+
+    const double safeZ = 5.0;
+
+    // Compute the Z position that produces the desired chamfer width
+    double angleRad = p.chamferAngle * (PI2D / 180.0);
+    double chamferZ = -(p.chamferWidth / std::tan(angleRad));
+    chamferZ -= p.depth; // additional axial depth allowance
+
+    // Rapid to approach position
+    ToolpathPoint approach;
+    approach.position = {profile[0].x, profile[0].y, safeZ};
+    approach.toolAxis = {0, 0, 1};
+    approach.motion   = MotionType::Rapid;
+    tp.addPoint(approach);
+
+    // Plunge to chamfer Z
+    ToolpathPoint plunge;
+    plunge.position = {profile[0].x, profile[0].y, chamferZ};
+    plunge.toolAxis = {0, 0, 1};
+    plunge.motion   = MotionType::PlungeFeed;
+    tp.addPoint(plunge);
+
+    // Cut the profile with lead-in and lead-out arcs
+    addContourPass(tp, profile, chamferZ,
+                   p.stockAllowance > 0 ? 1.5 : 2.0,
+                   p.stockAllowance > 0 ? 1.5 : 2.0);
+
+    // Retract
+    ToolpathPoint retract;
+    retract.position = {profile.back().x, profile.back().y, safeZ};
+    retract.toolAxis = {0, 0, 1};
+    retract.motion   = MotionType::Retract;
+    tp.addPoint(retract);
+
+    tp.markClean();
+    return tp;
+}
+
+// --------------------------------------------------------------------------
+// threadMill – helical interpolation to cut a thread
+//
+// The tool starts at `startZ`, ramps into the bore on a tangential arc,
+// then executes one full 360° helical pass per thread lead, advancing by
+// `pitchMM` per revolution.  After completing `passes` leads the tool
+// exits on a matching tangential arc.
+//
+// For internal threads (bore): the helix is clockwise (ArcCW) at the
+// thread minor diameter.  For external threads: counter-clockwise (ArcCCW).
+// --------------------------------------------------------------------------
+Toolpath Strategies2D::threadMill(const Geom::Vec2& centre,
+                                   double startZ,
+                                   const ThreadMillParams& p,
+                                   const CuttingTool& tool,
+                                   const CuttingParams& cuts)
+{
+    Toolpath tp(StrategyType::Thread, tool, cuts);
+
+    const double safeZ = startZ + 5.0;
+    const double threadR = p.majorDiameter * 0.5;
+    // Effective radius: position tool tip at nominal thread radius
+    const double toolR   = tool.diameter * 0.5;
+    const double helixR  = p.internal
+                           ? (threadR - toolR)   // bore: tool inside
+                           : (threadR + toolR);  // boss: tool outside
+    MotionType   arcType = p.internal ? MotionType::ArcCW : MotionType::ArcCCW;
+
+    // Rapid to safe Z above centre
+    ToolpathPoint safeApproach;
+    safeApproach.position = { centre.x, centre.y, safeZ };
+    safeApproach.toolAxis = {0, 0, 1};
+    safeApproach.motion   = MotionType::Rapid;
+    tp.addPoint(safeApproach);
+
+    // --- Tangential arc entry at startZ ---
+    // The tool enters at angle 0° (positive X from centre) and arcs in
+    const int entryPts = 8;
+    for (int i = 0; i <= entryPts; ++i) {
+        double frac = static_cast<double>(i) / entryPts;
+        // Swing from 90° to 0° (quarter circle approach from +Y to +X side)
+        double a = PI2D * 0.5 * (1.0 - frac);
+        ToolpathPoint pt;
+        pt.position = { centre.x + helixR * std::cos(a),
+                        centre.y + helixR * std::sin(a),
+                        startZ };
+        pt.toolAxis = {0, 0, 1};
+        pt.motion   = (i == 0) ? MotionType::PlungeFeed : arcType;
+        tp.addPoint(pt);
+    }
+
+    // --- Helical passes ---
+    const int stepsPerRev = 36; // 10° increments → smooth helix
+    const double zIncPerStep = -(p.pitchMM / stepsPerRev);
+
+    for (int pass = 0; pass < p.passes; ++pass) {
+        double zPass = startZ + pass * (-p.pitchMM);
+        for (int step = 1; step <= stepsPerRev; ++step) {
+            double a = (2.0 * PI2D) * static_cast<double>(step) / stepsPerRev;
+            if (!p.internal) a = -a; // reverse direction for external
+            double z = zPass + zIncPerStep * step;
+
+            ToolpathPoint pt;
+            pt.position = { centre.x + helixR * std::cos(a),
+                            centre.y + helixR * std::sin(a),
+                            z };
+            pt.toolAxis = {0, 0, 1};
+            pt.motion   = arcType;
+            tp.addPoint(pt);
+        }
+    }
+
+    // --- Tangential arc exit ---
+    double exitZ = startZ - p.passes * p.pitchMM;
+    for (int i = 1; i <= entryPts; ++i) {
+        double frac = static_cast<double>(i) / entryPts;
+        double a = 2.0 * PI2D * frac; // swing out to side then centre
+        double r = helixR * (1.0 - frac); // spiral in to centre
+        ToolpathPoint pt;
+        pt.position = { centre.x + r * std::cos(a),
+                        centre.y + r * std::sin(a),
+                        exitZ };
+        pt.toolAxis = {0, 0, 1};
+        pt.motion   = arcType;
+        tp.addPoint(pt);
+    }
+
+    // Retract
+    ToolpathPoint retract;
+    retract.position = { centre.x, centre.y, safeZ };
+    retract.toolAxis = {0, 0, 1};
+    retract.motion   = MotionType::Retract;
+    tp.addPoint(retract);
+
+    tp.markClean();
+    return tp;
+}

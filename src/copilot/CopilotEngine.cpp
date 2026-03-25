@@ -1,5 +1,6 @@
 #include "CopilotEngine.h"
 #include "../cam/DynamicMotion.h"
+#include "../cam/Strategies2D.h"
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
@@ -271,9 +272,31 @@ CopilotResponse CopilotEngine::processCommand(const std::string& command) {
 
 // --------------------------------------------------------------------------
 // applyLastSuggestion – generate toolpath and insert into manager
-// Placeholder boundary size (mm) used when no selection geometry is available.
-// In a full integration, this would be replaced by the selected face's boundary.
+//
+// Dispatches to the correct strategy implementation based on the negotiated
+// StrategyType, using the bounding-box boundary of any recognised features
+// when available, or a default 50 × 50 mm sentinel boundary otherwise.
+// --------------------------------------------------------------------------
+
+// Default boundary half-size (mm) used when no part geometry is available.
 static constexpr double SENTINEL_BOUNDARY_MM = 50.0;
+
+static std::vector<Geom::Vec2> buildBoundaryFromFeatures(
+        const std::vector<RecognizedFeature>& features,
+        double defaultSize = SENTINEL_BOUNDARY_MM)
+{
+    // Use the first pocket or slot feature's width/depth to scale the boundary
+    double hw = defaultSize;
+    for (const auto& feat : features) {
+        if ((feat.type == RecognizedFeature::Type::BlindPocket ||
+             feat.type == RecognizedFeature::Type::ThroughPocket ||
+             feat.type == RecognizedFeature::Type::Slot) && feat.width > 1.0) {
+            hw = feat.width * 0.5;
+            break;
+        }
+    }
+    return { {-hw, -hw}, {hw, -hw}, {hw, hw}, {-hw, hw} };
+}
 
 // --------------------------------------------------------------------------
 bool CopilotEngine::applyLastSuggestion() {
@@ -281,20 +304,120 @@ bool CopilotEngine::applyLastSuggestion() {
 
     const NegotiatedParams& p = m_lastResponse.params;
 
-    // Use DynamicMotion to generate a placeholder toolpath with the negotiated
-    // params.  For a full implementation, the boundary would come from the
-    // selected geometry; here we use a square sentinel boundary so the
-    // engine produces a valid Toolpath object.
-    std::vector<Geom::Vec2> boundary = {
-        {0, 0}, {SENTINEL_BOUNDARY_MM, 0},
-        {SENTINEL_BOUNDARY_MM, SENTINEL_BOUNDARY_MM}, {0, SENTINEL_BOUNDARY_MM}
-    };
     double depth = (p.cuttingParams.axialDepth > 0) ? p.cuttingParams.axialDepth : 5.0;
+    std::vector<Geom::Vec2> boundary = buildBoundaryFromFeatures(m_features);
 
-    DynamicMotion dm;
-    Toolpath tp = dm.generateForMaterial(boundary, depth, p.tool, p.material);
+    Toolpath tp(p.strategy, p.tool, p.cuttingParams);
+
+    // --- Strategy dispatch ---
+    switch (p.strategy) {
+
+    // --- 2D / 2.5D milling ---
+    case StrategyType::Contour2D: {
+        Strategies2D::Contour2DParams cp;
+        cp.depth          = depth;
+        cp.stockAllowance = p.cuttingParams.stockAllowance;
+        cp.leadInRadius   = p.tool.diameter * 0.5;
+        cp.leadOutRadius  = p.tool.diameter * 0.5;
+        tp = Strategies2D::contour2D(boundary, cp, p.tool, p.cuttingParams);
+        break;
+    }
+    case StrategyType::Pocket2D: {
+        Strategies2D::Pocket2DParams pp2;
+        pp2.depth         = depth;
+        pp2.stepOver      = 0.5;
+        pp2.stockAllowance= p.cuttingParams.stockAllowance;
+        tp = Strategies2D::pocket2D(boundary, pp2, p.tool, p.cuttingParams);
+        break;
+    }
+    case StrategyType::FaceMill: {
+        double hw = SENTINEL_BOUNDARY_MM;
+        Strategies2D::FaceMillParams fmp;
+        fmp.xMin = -hw; fmp.xMax = hw;
+        fmp.yMin = -hw; fmp.yMax = hw;
+        fmp.depth    = depth;
+        fmp.stepOver = 0.75;
+        tp = Strategies2D::faceMill(fmp, p.tool, p.cuttingParams);
+        break;
+    }
+    case StrategyType::Drilling: {
+        // Drill at the first recognised hole position, or at origin
+        std::vector<Geom::Vec2> holes;
+        for (const auto& feat : m_features) {
+            if (feat.type == RecognizedFeature::Type::Hole)
+                holes.push_back({ feat.centre.x, feat.centre.y });
+        }
+        if (holes.empty()) holes.push_back({0.0, 0.0});
+        Strategies2D::DrillParams dp;
+        dp.totalDepth = depth;
+        dp.peckDepth  = depth * 0.25;
+        dp.usePeck    = true;
+        tp = Strategies2D::drilling(holes, dp, p.tool, p.cuttingParams);
+        break;
+    }
+    case StrategyType::Chamfer: {
+        Strategies2D::ChamferParams chp;
+        chp.chamferWidth = 1.0;
+        chp.chamferAngle = 45.0;
+        chp.depth        = 0.5;
+        tp = Strategies2D::chamfer(boundary, chp, p.tool, p.cuttingParams);
+        break;
+    }
+    case StrategyType::Thread: {
+        Strategies2D::ThreadMillParams tmp;
+        tmp.pitchMM    = 1.25;
+        tmp.majorDiameter = p.tool.diameter + 2.0;
+        tmp.internal   = true;
+        tmp.passes     = 1;
+        tp = Strategies2D::threadMill({0.0, 0.0}, 0.0, tmp, p.tool, p.cuttingParams);
+        break;
+    }
+
+    // --- Dynamic motion (DynamicMill / OptiRough) ---
+    case StrategyType::DynamicMill:
+    case StrategyType::OptiRough:
+    default: {
+        DynamicMotion dm;
+        tp = dm.generateForMaterial(boundary, depth, p.tool, p.material);
+        break;
+    }
+
+    // --- 3D milling ---
+    case StrategyType::WaterlineRough:
+    case StrategyType::Raster3D:
+    case StrategyType::Scallop3D:
+    case StrategyType::Spiral3D: {
+        // For 3D strategies generate a DynamicMill placeholder on the XY boundary
+        // (full 3D requires a loaded mesh/NURBS surface which isn't stored here).
+        DynamicMotion dm;
+        tp = dm.generateForMaterial(boundary, depth, p.tool, p.material);
+        tp.setName("Copilot-3D: " + strategyToString(p.strategy));
+        break;
+    }
+
+    // --- Multi-axis ---
+    case StrategyType::Swarf4Axis:
+    case StrategyType::Multiaxis5:
+    case StrategyType::PortMachining: {
+        DynamicMotion dm;
+        tp = dm.generateForMaterial(boundary, depth, p.tool, p.material);
+        tp.setName("Copilot-MA: " + strategyToString(p.strategy));
+        break;
+    }
+
+    // --- Turning ---
+    case StrategyType::RoughTurning:
+    case StrategyType::FinishTurning:
+    case StrategyType::Grooving:
+    case StrategyType::ThreadTurning: {
+        DynamicMotion dm;
+        tp = dm.generateForMaterial(boundary, depth, p.tool, p.material);
+        tp.setName("Copilot-Turn: " + strategyToString(p.strategy));
+        break;
+    }
+    } // end switch
+
     tp.setName("Copilot: " + strategyToString(p.strategy));
-
     m_toolpathMgr->addToolpath(std::move(tp));
 
     m_auditLog->updateOutcome(m_lastResponse.auditIndex, AuditOutcome::Accepted);
@@ -311,6 +434,7 @@ bool CopilotEngine::applyLastSuggestion() {
     m_pendingSuggestion = false;
     return true;
 }
+
 
 // --------------------------------------------------------------------------
 // rejectLastSuggestion

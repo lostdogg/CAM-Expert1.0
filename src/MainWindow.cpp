@@ -6,6 +6,7 @@
 #include "ui/CopilotPanel.h"
 #include "managers/ToolpathManager.h"
 #include "managers/SolidsManager.h"
+#include "managers/SurfacesManager.h"
 #include "managers/LevelsManager.h"
 #include "managers/PlanesManager.h"
 #include "simulation/Backplot.h"
@@ -13,6 +14,8 @@
 #include "simulation/MachineSimulation.h"
 #include "cam/PostProcessor.h"
 #include "cam/DynamicMotion.h"
+#include "cam/Strategies2D.h"
+#include "cam/ProbingCycles.h"
 #include "cad/FileImporter.h"
 #include "cad/ModelPrep.h"
 #include "cad/FeatureRecognition.h"
@@ -301,10 +304,11 @@ void MainWindow::onCreate() {
     m_selectionBar = std::make_unique<SelectionBar>(m_hwnd, hInst);
 
     // --- Managers ---
-    m_toolpathMgr = std::make_unique<ToolpathManager>();
-    m_solidsMgr   = std::make_unique<SolidsManager>();
-    m_levelsMgr   = std::make_unique<LevelsManager>();
-    m_planesMgr   = std::make_unique<PlanesManager>();
+    m_toolpathMgr  = std::make_unique<ToolpathManager>();
+    m_solidsMgr    = std::make_unique<SolidsManager>();
+    m_surfacesMgr  = std::make_unique<SurfacesManager>();
+    m_levelsMgr    = std::make_unique<LevelsManager>();
+    m_planesMgr    = std::make_unique<PlanesManager>();
 
     // Connect toolpath manager to the viewport so toolpaths are rendered live
     m_viewport->setToolpathManager(m_toolpathMgr.get());
@@ -319,6 +323,11 @@ void MainWindow::onCreate() {
 
     // Connect the solids manager change callback to trigger a viewport redraw
     m_solidsMgr->setOnChange([this]() {
+        if (m_viewport) m_viewport->redraw();
+    });
+
+    // Connect the surfaces manager change callback to trigger a viewport redraw
+    m_surfacesMgr->setOnChange([this]() {
         if (m_viewport) m_viewport->redraw();
     });
 
@@ -351,6 +360,7 @@ void MainWindow::onCreate() {
 void MainWindow::buildMenu() {
     HMENU hMenu     = CreateMenu();
     HMENU hFile     = CreatePopupMenu();
+    HMENU hSurface  = CreatePopupMenu();
     HMENU hMachine  = CreatePopupMenu();
     HMENU hView     = CreatePopupMenu();
     HMENU hHelp     = CreatePopupMenu();
@@ -365,6 +375,17 @@ void MainWindow::buildMenu() {
     AppendMenuW(hFile, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hFile, MF_STRING,  IDM_FILE_EXIT,   L"E&xit\tAlt+F4");
 
+    // Surfaces menu
+    AppendMenuW(hSurface, MF_STRING, IDM_SURF_LOFT,    L"&Loft…");
+    AppendMenuW(hSurface, MF_STRING, IDM_SURF_REVOLVE, L"&Revolve…");
+    AppendMenuW(hSurface, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hSurface, MF_STRING, IDM_SURF_FILLET,  L"&Fillet Blend…");
+    AppendMenuW(hSurface, MF_STRING, IDM_SURF_OFFSET,  L"&Offset…");
+    AppendMenuW(hSurface, MF_STRING, IDM_SURF_EXTEND,  L"&Extend…");
+    AppendMenuW(hSurface, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hSurface, MF_STRING, IDM_SURF_TRIM,    L"&Trim");
+    AppendMenuW(hSurface, MF_STRING, IDM_SURF_UNTRIM,  L"&Untrim");
+
     // Machine menu
     AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_BACKPLOT, L"&Backplot");
     AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_VERIFY,   L"&Verify");
@@ -374,6 +395,12 @@ void MainWindow::buildMenu() {
     AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_GEN_POCKET,  L"Generate 2D &Pocket…");
     AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_GEN_CONTOUR, L"Generate 2D &Contour…");
+    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_CHAMFER,     L"Generate C&hamfer…");
+    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_THREAD,      L"Generate T&hread Mill…");
+    AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_PROBE_Z,     L"Probe &Z Surface…");
+    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_PROBE_BORE,  L"Probe &Bore/Boss Center…");
+    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_PROBE_CORNER,L"Probe C&orner…");
     AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_REGEN,    L"Re&generate All\tF5");
     AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_SUMMARY,  L"&Machining Summary…");
@@ -399,6 +426,7 @@ void MainWindow::buildMenu() {
     AppendMenuW(hHelp, MF_STRING, IDM_COPILOT_TOGGLE,  L"Toggle &Copilot Panel\tF1");
 
     AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hFile),    L"&File");
+    AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hSurface), L"&Surfaces");
     AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hMachine), L"&Machine");
     AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hView),    L"&View");
     AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hHelp),    L"&Help");
@@ -469,6 +497,11 @@ void MainWindow::onCommand(int id) {
     case IDM_MACHINE_POST:     postProcess();   break;
     case IDM_MACHINE_GEN_POCKET:  generateToolpathPocket();  break;
     case IDM_MACHINE_GEN_CONTOUR: generateToolpathContour(); break;
+    case IDM_MACHINE_CHAMFER:     generateToolpathChamfer(); break;
+    case IDM_MACHINE_THREAD:      generateToolpathThread();  break;
+    case IDM_MACHINE_PROBE_Z:     probeZSurface();           break;
+    case IDM_MACHINE_PROBE_BORE:  probeBoreCenter();         break;
+    case IDM_MACHINE_PROBE_CORNER:probeCorner();             break;
     case IDM_MACHINE_REGEN:       regenerateAllToolpaths();  break;
     case IDM_MACHINE_SUMMARY:     showMachiningSummary();    break;
 
@@ -518,16 +551,13 @@ void MainWindow::onCommand(int id) {
         createWireframe(id);
         break;
 
-    case IDM_SURF_LOFT:
-    case IDM_SURF_REVOLVE:
-    case IDM_SURF_EXTEND:
-    case IDM_SURF_FILLET:
-    case IDM_SURF_OFFSET:
-    case IDM_SURF_TRIM:
-    case IDM_SURF_UNTRIM:
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-            reinterpret_cast<LPARAM>(L"Surface operation: select source geometry in the viewport."));
-        break;
+    case IDM_SURF_LOFT:    surfaceLoft();    break;
+    case IDM_SURF_REVOLVE: surfaceRevolve(); break;
+    case IDM_SURF_FILLET:  surfaceFillet();  break;
+    case IDM_SURF_OFFSET:  surfaceOffset();  break;
+    case IDM_SURF_TRIM:    surfaceTrim();    break;
+    case IDM_SURF_UNTRIM:  surfaceUntrim();  break;
+    case IDM_SURF_EXTEND:  surfaceExtend();  break;
 
     case IDM_SOLID_EXTRUDE:  createSolidBox();             break;
     case IDM_SOLID_REVOLVE:  createSolidCylinder();        break;
@@ -586,17 +616,24 @@ void MainWindow::showAboutDialog() {
         L"\n\nComputer-Aided Manufacturing & Design software.\n"
         L"Supports 2D/2.5D, 3D, and Multi-Axis machining strategies.\n"
         L"Post-Processor: Fanuc, Haas, Heidenhain, and more.\n\n"
-        L"\u00A9 2024 CAM-Expert Project";
+        L"New in v1.1:\n"
+        L"  \u2022 NURBS Surface creation (Loft, Revolve, Fillet, Offset, Extend, Trim)\n"
+        L"  \u2022 Chamfer and Thread Mill strategies\n"
+        L"  \u2022 Probing cycles (Z-surface, Bore/Boss, Corner)\n"
+        L"  \u2022 Strategy-aware Copilot apply (drill, contour, pocket, chamfer, thread)\n"
+        L"  \u2022 Feature-Recognition depth computed from solid geometry\n\n"
+        L"\u00A9 2024\u20132025 CAM-Expert Project";
     MessageBoxW(m_hwnd, msg.c_str(), L"About CAM-Expert", MB_OK | MB_ICONINFORMATION);
 }
 
 // --------------------------------------------------------------------------
 void MainWindow::fileNew() {
     // Reset managers and viewport for a fresh session
-    if (m_toolpathMgr) m_toolpathMgr->clear();
-    if (m_solidsMgr)   m_solidsMgr->clear();
-    if (m_levelsMgr)   m_levelsMgr->clear();
-    if (m_viewport)    m_viewport->reset();
+    if (m_toolpathMgr)  m_toolpathMgr->clear();
+    if (m_solidsMgr)    m_solidsMgr->clear();
+    if (m_surfacesMgr)  m_surfacesMgr->clear();
+    if (m_levelsMgr)    m_levelsMgr->clear();
+    if (m_viewport)     m_viewport->reset();
     m_currentFile.clear();
     updateWindowTitle();
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
@@ -1613,9 +1650,10 @@ void MainWindow::loadProjectCamx(const std::wstring& wpath) {
     }
 
     // Clear existing session data
-    if (m_toolpathMgr) m_toolpathMgr->clear();
-    if (m_solidsMgr)   m_solidsMgr->clear();
-    if (m_levelsMgr)   m_levelsMgr->clear();
+    if (m_toolpathMgr)  m_toolpathMgr->clear();
+    if (m_solidsMgr)    m_solidsMgr->clear();
+    if (m_surfacesMgr)  m_surfacesMgr->clear();
+    if (m_levelsMgr)    m_levelsMgr->clear();
 
     std::string line;
     if (!std::getline(f, line) || line.substr(0, 4) != "CAMX") {
@@ -1979,4 +2017,461 @@ void MainWindow::updateWindowTitle() {
         title += L" – Untitled";
     }
     SetWindowTextW(m_hwnd, title.c_str());
+}
+
+// ==========================================================================
+// Surface operations (Surfaces tab)
+// ==========================================================================
+
+static constexpr double kSurfPi = 3.14159265358979323846;
+
+// --------------------------------------------------------------------------
+// IDM_SURF_LOFT – create a ruled loft surface through two parallel profiles
+// --------------------------------------------------------------------------
+void MainWindow::surfaceLoft()
+{
+    if (!m_surfacesMgr) return;
+
+    double width = 100.0, depth = 60.0, height = 40.0;
+    if (!promptTriple(L"Create Loft Surface",
+                      L"Profile width  (mm):", width,  width,
+                      L"Profile depth  (mm):", depth,  depth,
+                      L"Sweep height   (mm):", height, height))
+        return;
+
+    if (width <= 0 || depth <= 0 || height <= 0) {
+        MessageBoxW(m_hwnd, L"Dimensions must be positive.",
+                    L"Create Loft Surface", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // Two rectangular cross-sections: bottom at Z=0, top at Z=height
+    // with the top section scaled to 80% to give a slight taper.
+    const double scale = 0.8;
+    std::vector<std::vector<Geom::Vec3>> sections = {
+        // Bottom profile (Z = 0)
+        { {-width/2, -depth/2, 0}, {width/2, -depth/2, 0},
+          {width/2,  depth/2, 0},  {-width/2, depth/2, 0} },
+        // Top profile (Z = height, scaled)
+        { {-width*scale/2, -depth*scale/2, height},
+          { width*scale/2, -depth*scale/2, height},
+          { width*scale/2,  depth*scale/2, height},
+          {-width*scale/2,  depth*scale/2, height} }
+    };
+
+    static int loftCount = 0;
+    std::string name = "Loft_" + std::to_string(++loftCount);
+
+    NurbsSurface surf = SurfacesManager::makeLoft(sections);
+    m_surfacesMgr->addSurface(std::move(surf), name);
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200, L"Loft surface created: %.4g × %.4g mm, sweep %.4g mm  [%hs]",
+                  width, depth, height, name.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SURF_REVOLVE – create a surface of revolution
+// --------------------------------------------------------------------------
+void MainWindow::surfaceRevolve()
+{
+    if (!m_surfacesMgr) return;
+
+    double radius = 30.0, height = 80.0, angle = 360.0;
+    if (!promptTriple(L"Create Revolution Surface",
+                      L"Profile radius (mm):", radius, radius,
+                      L"Profile height (mm):", height, height,
+                      L"Sweep angle   (deg):", angle,  angle))
+        return;
+
+    if (radius <= 0 || height <= 0 || std::abs(angle) < 1.0) {
+        MessageBoxW(m_hwnd, L"Radius and height must be positive; angle must be non-zero.",
+                    L"Create Revolution Surface", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // Straight line profile in the XZ-plane from (radius,0,0) to (radius,0,height)
+    const int profilePts = 6;
+    std::vector<Geom::Vec3> profile;
+    profile.reserve(static_cast<std::size_t>(profilePts));
+    for (int i = 0; i < profilePts; ++i) {
+        double t = static_cast<double>(i) / (profilePts - 1);
+        profile.push_back({ radius, 0.0, t * height });
+    }
+
+    static int revCount = 0;
+    std::string name = "Revolve_" + std::to_string(++revCount);
+
+    NurbsSurface surf = SurfacesManager::makeRevolve(profile, angle);
+    m_surfacesMgr->addSurface(std::move(surf), name);
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200, L"Revolution surface created: R=%.4g mm, H=%.4g mm, %.4g°  [%hs]",
+                  radius, height, angle, name.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SURF_FILLET – create a fillet blend surface between two existing surfaces
+// --------------------------------------------------------------------------
+void MainWindow::surfaceFillet()
+{
+    if (!m_surfacesMgr) return;
+
+    if (m_surfacesMgr->count() < 2) {
+        MessageBoxW(m_hwnd,
+            L"A fillet requires at least two existing surfaces.\n"
+            L"Create two surfaces first (e.g. Loft and Revolve).",
+            L"Surface Fillet", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    double filletR = 5.0;
+    if (!promptSingle(L"Surface Fillet",
+                      L"Fillet radius (mm):", filletR, filletR))
+        return;
+
+    if (filletR <= 0) {
+        MessageBoxW(m_hwnd, L"Fillet radius must be positive.",
+                    L"Surface Fillet", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    const NurbsSurface& s1 = m_surfacesMgr->at(m_surfacesMgr->count() - 2).surface;
+    const NurbsSurface& s2 = m_surfacesMgr->at(m_surfacesMgr->count() - 1).surface;
+
+    static int filletCount = 0;
+    std::string name = "Fillet_" + std::to_string(++filletCount);
+
+    NurbsSurface fillet = SurfacesManager::makeFillet(s1, s2, filletR);
+    m_surfacesMgr->addSurface(std::move(fillet), name);
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200, L"Fillet surface created: R=%.4g mm  [%hs]",
+                  filletR, name.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SURF_OFFSET – offset the currently selected / most recent surface
+// --------------------------------------------------------------------------
+void MainWindow::surfaceOffset()
+{
+    if (!m_surfacesMgr || m_surfacesMgr->count() == 0) {
+        MessageBoxW(m_hwnd, L"No surfaces in the session. Create a surface first.",
+                    L"Surface Offset", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    double dist = 5.0;
+    if (!promptSingle(L"Offset Surface",
+                      L"Offset distance (mm):", dist, dist))
+        return;
+
+    if (std::abs(dist) < 1e-6) {
+        MessageBoxW(m_hwnd, L"Offset distance must be non-zero.",
+                    L"Surface Offset", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    const NurbsSurface& src = m_surfacesMgr->at(m_surfacesMgr->count() - 1).surface;
+
+    static int offsetCount = 0;
+    std::string name = "Offset_" + std::to_string(++offsetCount);
+
+    NurbsSurface offset = SurfacesManager::makeOffset(src, dist);
+    m_surfacesMgr->addSurface(std::move(offset), name);
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200, L"Offset surface created: d=%.4g mm  [%hs]",
+                  dist, name.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SURF_TRIM – mark the active surface as trimmed
+// --------------------------------------------------------------------------
+void MainWindow::surfaceTrim()
+{
+    if (!m_surfacesMgr || m_surfacesMgr->count() == 0) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(
+                L"Trim: no surfaces in session. Create a surface first."));
+        return;
+    }
+
+    int idx = m_surfacesMgr->count() - 1;
+    if (m_surfacesMgr->at(idx).trimmed) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Surface is already trimmed. Use Untrim to remove."));
+        return;
+    }
+
+    m_surfacesMgr->setTrimmed(idx, true);
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200, L"Surface \"%hs\" marked as trimmed.",
+                  m_surfacesMgr->at(idx).name.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SURF_UNTRIM – remove trim state from the active surface
+// --------------------------------------------------------------------------
+void MainWindow::surfaceUntrim()
+{
+    if (!m_surfacesMgr || m_surfacesMgr->count() == 0) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(
+                L"Untrim: no surfaces in session."));
+        return;
+    }
+
+    int idx = m_surfacesMgr->count() - 1;
+    if (!m_surfacesMgr->at(idx).trimmed) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Surface has no trim to remove."));
+        return;
+    }
+
+    m_surfacesMgr->setTrimmed(idx, false);
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200, L"Surface \"%hs\" untrimmed (full parameter domain restored).",
+                  m_surfacesMgr->at(idx).name.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SURF_EXTEND – extend the active surface in the U-direction
+// --------------------------------------------------------------------------
+void MainWindow::surfaceExtend()
+{
+    if (!m_surfacesMgr || m_surfacesMgr->count() == 0) {
+        MessageBoxW(m_hwnd, L"No surfaces in session. Create a surface first.",
+                    L"Extend Surface", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    double extDist = 10.0;
+    if (!promptSingle(L"Extend Surface",
+                      L"Extension distance (mm):", extDist, extDist))
+        return;
+
+    if (extDist <= 0) {
+        MessageBoxW(m_hwnd, L"Extension distance must be positive.",
+                    L"Extend Surface", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    const NurbsSurface& src = m_surfacesMgr->at(m_surfacesMgr->count() - 1).surface;
+
+    static int extCount = 0;
+    std::string name = "Extend_" + std::to_string(++extCount);
+
+    NurbsSurface extended = SurfacesManager::makeExtend(src, extDist, 1 /*extend at uMax*/);
+    m_surfacesMgr->addSurface(std::move(extended), name);
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200, L"Surface extended by %.4g mm  [%hs]",
+                  extDist, name.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// ==========================================================================
+// Additional CAM toolpath generators (Machine tab)
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+// Generate a chamfer milling toolpath along the active solid's boundary
+// --------------------------------------------------------------------------
+void MainWindow::generateToolpathChamfer()
+{
+    double chamferW = 1.0, toolDiam = 10.0;
+    if (!promptDouble2(L"Generate Chamfer",
+                       L"Chamfer width  (mm):", chamferW, chamferW,
+                       L"Tool diameter  (mm):", toolDiam, toolDiam))
+        return;
+
+    if (chamferW <= 0 || toolDiam <= 0) {
+        MessageBoxW(m_hwnd, L"Chamfer width and tool diameter must be positive.",
+                    L"Generate Chamfer", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // Build profile from active solid boundary or default
+    std::vector<Geom::Vec2> profile;
+    if (m_solidsMgr && m_solidsMgr->count() > 0) {
+        Geom::AABB bb = m_solidsMgr->aggregateBoundingBox();
+        if (bb.isValid()) {
+            profile = { {bb.min.x, bb.min.y}, {bb.max.x, bb.min.y},
+                        {bb.max.x, bb.max.y}, {bb.min.x, bb.max.y},
+                        {bb.min.x, bb.min.y} };
+        }
+    }
+    if (profile.empty())
+        profile = { {-50,-50}, {50,-50}, {50,50}, {-50,50}, {-50,-50} };
+
+    CuttingTool tool;
+    tool.type     = ToolType::EndMill;
+    tool.diameter = toolDiam;
+
+    CuttingParams params;
+    params.feedRate   = 600.0;
+    params.spindleRPM = 8000;
+
+    Strategies2D::ChamferParams cp;
+    cp.chamferWidth = chamferW;
+    cp.chamferAngle = 45.0;
+
+    Toolpath tp = Strategies2D::chamfer(profile, cp, tool, params);
+
+    static int chamferCount = 0;
+    tp.setName("Chamfer_" + std::to_string(++chamferCount));
+    m_toolpathMgr->addToolpath(std::move(tp));
+
+    wchar_t statusMsg[160] = {};
+    std::swprintf(statusMsg, 160,
+        L"Chamfer toolpath generated: %.4g mm × 45°, Ø%.4g tool.",
+        chamferW, toolDiam);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// --------------------------------------------------------------------------
+// Generate a thread mill toolpath at a user-specified position
+// --------------------------------------------------------------------------
+void MainWindow::generateToolpathThread()
+{
+    double cx = 0.0, pitch = 1.25, majDia = 12.0;
+    if (!promptTriple(L"Thread Mill",
+                      L"Centre X (mm):",  cx,     cx,
+                      L"Thread pitch (mm):", pitch, pitch,
+                      L"Major diameter (mm):", majDia, majDia))
+        return;
+
+    if (pitch <= 0 || majDia <= 0) {
+        MessageBoxW(m_hwnd, L"Pitch and major diameter must be positive.",
+                    L"Thread Mill", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    CuttingTool tool;
+    tool.type     = ToolType::EndMill;
+    tool.diameter = majDia * 0.5; // thread mill Ø ≈ 50% of major diameter
+
+    CuttingParams params;
+    params.feedRate   = 300.0;
+    params.spindleRPM = 6000;
+
+    Strategies2D::ThreadMillParams tmp;
+    tmp.pitchMM       = pitch;
+    tmp.majorDiameter = majDia;
+    tmp.internal      = true;
+    tmp.passes        = 1;
+
+    Toolpath tp = Strategies2D::threadMill({cx, 0.0}, 0.0, tmp, tool, params);
+
+    static int threadCount = 0;
+    tp.setName("ThreadMill_" + std::to_string(++threadCount));
+    m_toolpathMgr->addToolpath(std::move(tp));
+
+    wchar_t statusMsg[160] = {};
+    std::swprintf(statusMsg, 160,
+        L"Thread mill toolpath: M%.4g×%.4g pitch, centre X=%.4g mm.",
+        majDia, pitch, cx);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// --------------------------------------------------------------------------
+// Probing cycle – Z-surface probe
+// --------------------------------------------------------------------------
+void MainWindow::probeZSurface()
+{
+    double cx = 0.0, cy = 0.0, expectedZ = 0.0;
+    if (!promptTriple(L"Probe Z Surface",
+                      L"Probe X (mm):", cx, cx,
+                      L"Probe Y (mm):", cy, cy,
+                      L"Expected Z (mm):", expectedZ, expectedZ))
+        return;
+
+    ProbeParams pp;
+    pp.safeZ = expectedZ + 10.0;
+
+    ProbeResult result = ProbingCycles::zSurface({cx, cy}, expectedZ, pp);
+
+    static int probeCount = 0;
+    result.motionPath.setName("ProbeZ_" + std::to_string(++probeCount));
+    m_toolpathMgr->addToolpath(std::move(result.motionPath));
+
+    wchar_t statusMsg[200] = {};
+    std::swprintf(statusMsg, 200,
+        L"Z-surface probe added at (%.4g, %.4g). G-code: %d chars.",
+        cx, cy, static_cast<int>(result.gcode.size()));
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// --------------------------------------------------------------------------
+// Probing cycle – bore/boss center-finder
+// --------------------------------------------------------------------------
+void MainWindow::probeBoreCenter()
+{
+    double cx = 0.0, cy = 0.0, approxR = 15.0;
+    if (!promptTriple(L"Probe Bore / Boss Center",
+                      L"Approx. centre X (mm):", cx, cx,
+                      L"Approx. centre Y (mm):", cy, cy,
+                      L"Approx. radius   (mm):", approxR, approxR))
+        return;
+
+    if (approxR <= 0) {
+        MessageBoxW(m_hwnd, L"Approximate radius must be positive.",
+                    L"Probe Bore Center", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    ProbeParams pp;
+    ProbeResult result = ProbingCycles::bore({cx, cy}, approxR, -5.0, 4, pp);
+
+    static int boreProbeCount = 0;
+    result.motionPath.setName("ProbeBore_" + std::to_string(++boreProbeCount));
+    m_toolpathMgr->addToolpath(std::move(result.motionPath));
+
+    wchar_t statusMsg[200] = {};
+    std::swprintf(statusMsg, 200,
+        L"Bore-center probe added: approx. (%.4g, %.4g) R=%.4g mm.",
+        cx, cy, approxR);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// --------------------------------------------------------------------------
+// Probing cycle – corner finder
+// --------------------------------------------------------------------------
+void MainWindow::probeCorner()
+{
+    double cx = 0.0, cy = 0.0, xSize = 100.0;
+    if (!promptTriple(L"Probe Corner",
+                      L"Approx. corner X (mm):", cx,    cx,
+                      L"Approx. corner Y (mm):", cy,    cy,
+                      L"Stock X size (mm):",     xSize, xSize))
+        return;
+
+    ProbeParams pp;
+    ProbeResult result = ProbingCycles::cornerFinder({cx, cy}, xSize, xSize, -5.0, pp);
+
+    static int cornerProbeCount = 0;
+    result.motionPath.setName("ProbeCorner_" + std::to_string(++cornerProbeCount));
+    m_toolpathMgr->addToolpath(std::move(result.motionPath));
+
+    wchar_t statusMsg[200] = {};
+    std::swprintf(statusMsg, 200,
+        L"Corner probe added at approx. (%.4g, %.4g).",
+        cx, cy);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
 }
