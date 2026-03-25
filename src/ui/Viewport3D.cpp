@@ -1,5 +1,7 @@
 #include "Viewport3D.h"
 #include "../managers/ToolpathManager.h"
+#include "../managers/SolidsManager.h"
+#include "../cad/BRep.h"
 #include <gl/gl.h>
 #include <gl/glu.h>
 #include <cmath>
@@ -33,6 +35,12 @@ Viewport3D::~Viewport3D() {
 // --------------------------------------------------------------------------
 void Viewport3D::setToolpathManager(const ToolpathManager* mgr) {
     m_toolpathMgr = mgr;
+    redraw();
+}
+
+// --------------------------------------------------------------------------
+void Viewport3D::setSolidsManager(const SolidsManager* mgr) {
+    m_solidsMgr = mgr;
     redraw();
 }
 
@@ -192,6 +200,7 @@ void Viewport3D::render() {
     drawGrid();
     drawAxes();
     drawStock();
+    drawSolids();
     drawToolpaths();
 
     SwapBuffers(m_hDC);
@@ -286,6 +295,94 @@ void Viewport3D::drawStock() {
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     } else {
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glEnable(GL_LIGHTING);
+    }
+}
+
+// --------------------------------------------------------------------------
+// Render BRep solid bodies from SolidsManager (shaded faces + wireframe edges)
+// --------------------------------------------------------------------------
+void Viewport3D::drawSolids() {
+    if (!m_solidsMgr || m_solidsMgr->count() == 0) return;
+
+    for (int i = 0; i < m_solidsMgr->count(); ++i) {
+        const SolidEntry& entry = m_solidsMgr->at(i);
+        if (!entry.visible) continue;
+
+        const BRep::Solid&            solid  = entry.solid;
+        const std::vector<BRep::Vertex>& verts = solid.vertices();
+        const std::vector<BRep::Edge>&   edges = solid.edges();
+        const std::vector<BRep::Face>&   faces = solid.faces();
+
+        if (verts.empty()) continue;
+
+        // --- Shaded face pass (skip in wireframe mode) ---
+        if (m_renderMode != RenderMode::Wireframe) {
+            glEnable(GL_LIGHTING);
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            if (m_renderMode == RenderMode::Translucent) {
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            }
+
+            // Colour: gold for selected, steel-blue for normal
+            if (entry.selected)
+                glColor4f(0.85f, 0.65f, 0.15f,
+                          m_renderMode == RenderMode::Translucent ? 0.50f : 0.90f);
+            else
+                glColor4f(0.55f, 0.65f, 0.80f,
+                          m_renderMode == RenderMode::Translucent ? 0.40f : 0.85f);
+
+            for (const auto& face : faces) {
+                // Render Planar and Spherical faces via edge-vertex polygon.
+                // Cylindrical/Conical/Toroidal faces have interleaved multi-quad
+                // edge lists and are shown only as wireframe edges below.
+                if (face.type == BRep::FaceType::Cylindrical ||
+                    face.type == BRep::FaceType::Conical     ||
+                    face.type == BRep::FaceType::Toroidal    ||
+                    face.type == BRep::FaceType::NURBS)
+                    continue;
+                if (face.edgeIds.empty()) continue;
+
+                glNormal3d(face.normal.x, face.normal.y, face.normal.z);
+                glBegin(GL_POLYGON);
+                for (int eid : face.edgeIds) {
+                    if (eid < 0 || eid >= static_cast<int>(edges.size())) continue;
+                    int vid = edges[eid].startVertexId;
+                    if (vid < 0 || vid >= static_cast<int>(verts.size())) continue;
+                    const Geom::Vec3& pos = verts[vid].point;
+                    glVertex3d(pos.x, pos.y, pos.z);
+                }
+                glEnd();
+            }
+
+            if (m_renderMode == RenderMode::Translucent)
+                glDisable(GL_BLEND);
+        }
+
+        // --- Wireframe edge pass (always drawn) ---
+        glDisable(GL_LIGHTING);
+        glLineWidth(1.2f);
+        if (m_renderMode == RenderMode::Wireframe)
+            glColor3f(0.70f, 0.75f, 0.92f);  // bright in wireframe mode
+        else if (entry.selected)
+            glColor3f(0.95f, 0.75f, 0.10f);  // gold silhouette when selected
+        else
+            glColor3f(0.30f, 0.35f, 0.50f);  // dark edge overlay in shaded mode
+
+        glBegin(GL_LINES);
+        for (const auto& edge : edges) {
+            int sv = edge.startVertexId, ev = edge.endVertexId;
+            if (sv < 0 || sv >= static_cast<int>(verts.size())) continue;
+            if (ev < 0 || ev >= static_cast<int>(verts.size())) continue;
+            const Geom::Vec3& p0 = verts[sv].point;
+            const Geom::Vec3& p1 = verts[ev].point;
+            glVertex3d(p0.x, p0.y, p0.z);
+            glVertex3d(p1.x, p1.y, p1.z);
+        }
+        glEnd();
+
+        glLineWidth(1.0f);
         glEnable(GL_LIGHTING);
     }
 }

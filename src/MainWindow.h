@@ -38,6 +38,10 @@ constexpr int IDM_MACHINE_POST    = 2001;
 constexpr int IDM_MACHINE_VERIFY  = 2002;
 constexpr int IDM_MACHINE_BACKPLOT= 2003;
 constexpr int IDM_MACHINE_SIM     = 2004;
+constexpr int IDM_MACHINE_GEN_POCKET  = 2005; // Generate a 2D dynamic pocket toolpath
+constexpr int IDM_MACHINE_GEN_CONTOUR = 2006; // Generate a 2D dynamic contour toolpath
+constexpr int IDM_MACHINE_REGEN       = 2007; // Regenerate all toolpaths
+constexpr int IDM_MACHINE_SUMMARY     = 2008; // Show machining summary
 
 constexpr int IDM_VIEW_WIREFRAME  = 3001;
 constexpr int IDM_VIEW_SHADED     = 3002;
@@ -77,6 +81,7 @@ constexpr int IDM_SOLID_SUBTRACT  = 4204;
 constexpr int IDM_SOLID_INTERSECT = 4205;
 constexpr int IDM_SOLID_SHELL     = 4206;
 constexpr int IDM_SOLID_FILLET    = 4207;
+constexpr int IDM_SOLID_SPHERE    = 4208;  // Create a parametric sphere
 
 // Model Prep tab commands
 constexpr int IDM_PREP_HEAL       = 4301;
@@ -136,6 +141,7 @@ private:
     // --- Solid creation (Solids tab) ---
     void createSolidBox();        // IDM_SOLID_EXTRUDE: box via parameter dialog
     void createSolidCylinder();   // IDM_SOLID_REVOLVE: cylinder via parameter dialog
+    void createSolidSphere();     // IDM_SOLID_SPHERE: sphere via parameter dialog
     void solidBooleanOp(int commandId); // Union / Subtract / Intersect
 
     // --- Wireframe primitive creation (Wireframe tab) ---
@@ -149,9 +155,18 @@ private:
     void prepAnalyse();       // Run model analysis / draft check
     void prepSplit();         // Split solid at active work plane
 
+    // --- CAM toolpath generation (Machine tab) ---
+    void generateToolpathPocket();   // 2D dynamic pocket roughing
+    void generateToolpathContour();  // 2D dynamic contour following
+    void regenerateAllToolpaths();   // Regen all dirty toolpaths
+    void showMachiningSummary();     // Stats dialog (time, length, operations)
+
     // --- Project serialisation (CAMX format) ---
     void loadProjectCamx(const std::wstring& path);
     void saveProjectCamx(const std::wstring& path);
+
+    // --- Utility ---
+    void updateWindowTitle();   // Reflect m_currentFile in title bar
 
     // --- Input dialog helpers ---
     // Show a one-value prompt; returns true if the user clicked OK.
@@ -175,6 +190,8 @@ private:
     HWND                              m_hwnd          = nullptr;
     HWND                              m_hStatusBar    = nullptr;
     HWND                              m_hManagersPanel= nullptr;
+
+    std::wstring                      m_currentFile;  // path of the currently open project (empty = untitled)
 
     std::unique_ptr<RibbonUI>         m_ribbon;
     std::unique_ptr<Viewport3D>       m_viewport;

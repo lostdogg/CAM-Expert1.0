@@ -61,6 +61,7 @@ public:
     // Factory helpers
     static Solid makeBox(double dx, double dy, double dz);
     static Solid makeCylinder(double radius, double height);
+    static Solid makeSphere(double radius, int latBands = 8, int lonSegs = 16);
 
     // Accessors
     const std::vector<Vertex>& vertices() const { return m_vertices; }
