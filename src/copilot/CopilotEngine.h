@@ -6,6 +6,11 @@
 #include "ContextBuffer.h"
 #include "ParameterNegotiator.h"
 #include "AuditLog.h"
+#include "LocalInferenceEngine.h"
+#include "VectorDatabase.h"
+#include "GeometricTokenizer.h"
+#include "ConstrainedOutputValidator.h"
+#include "SelfCorrectionLoop.h"
 #include "../cam/MaterialLibrary.h"
 #include "../cam/DynamicMotion.h"
 #include "../managers/ToolpathManager.h"
@@ -86,6 +91,23 @@ public:
     // Log file path (set before first call to processCommand).
     void setAuditLogPath(const std::string& path);
 
+    // Path to a local quantized model file (GGUF / ONNX).
+    // If not set the rule-based backend is used automatically.
+    void setModelPath(const std::string& path) { m_inferenceEngine.setModelPath(path); }
+
+    // Preload the local AI model (called when Toolpath Manager opens).
+    // Returns false if loading fails; a descriptive error is appended to errorOut.
+    bool loadInferenceModel(std::string* errorOut = nullptr);
+
+    // Unload the local AI model to reclaim RAM / VRAM.
+    void unloadInferenceModel();
+
+    // Human-readable hardware summary (CPU, GPU, free RAM).
+    std::string hardwareSummary() const;
+
+    // Access the local RAG knowledge base for external population.
+    VectorDatabase& vectorDatabase() { return m_vectorDb; }
+
     // --- Commands ---
 
     // Process a free-form text command from the user.
@@ -138,6 +160,13 @@ private:
     ContextBuffer        m_contextBuf;
     ParameterNegotiator  m_negotiator;
     std::unique_ptr<AuditLog> m_auditLog;
+
+    // --- Local AI components ---
+    LocalInferenceEngine       m_inferenceEngine;  // SLM backend (hardware-aware)
+    VectorDatabase             m_vectorDb;         // RAG knowledge base
+    GeometricTokenizer         m_geoTokenizer;     // 3D → text tokens
+    ConstrainedOutputValidator m_validator;        // parameter safety gate
+    SelfCorrectionLoop         m_correctionLoop;   // gouge re-inference
 
     // --- Live pointers (not owned) ---
     ToolpathManager*               m_toolpathMgr = nullptr;
