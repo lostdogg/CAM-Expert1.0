@@ -32,12 +32,16 @@ VerifyResult Verify::run(const ToolpathManager* mgr) {
         totalMoves += static_cast<int>(pts.size());
     }
 
-    // Helper: convert world XY to a clamped ZMap cell index pair
+    // Helper: convert world XY to a clamped ZMap cell index pair.
+    // Clamp the raw double value before casting to int to avoid undefined
+    // behaviour when coordinates lie far outside the stock bounds.
     auto worldToCell = [&](double wx, double wy, int& xi, int& yi) {
-        xi = static_cast<int>((wx - m_stockMap.xMin) / m_stockMap.cellW());
-        yi = static_cast<int>((wy - m_stockMap.yMin) / m_stockMap.cellH());
-        xi = std::max(0, std::min(m_stockMap.xRes - 1, xi));
-        yi = std::max(0, std::min(m_stockMap.yRes - 1, yi));
+        double rawXi = (wx - m_stockMap.xMin) / m_stockMap.cellW();
+        double rawYi = (wy - m_stockMap.yMin) / m_stockMap.cellH();
+        xi = static_cast<int>(std::max(0.0,
+                 std::min(static_cast<double>(m_stockMap.xRes - 1), rawXi)));
+        yi = static_cast<int>(std::max(0.0,
+                 std::min(static_cast<double>(m_stockMap.yRes - 1), rawYi)));
     };
 
     VerifyResult res;
@@ -109,10 +113,12 @@ bool Verify::detectGouge(const ToolpathPoint& from, const ToolpathPoint& to,
             return true;
 
         // Also check if tip is already below the existing stock height
-        int xi = static_cast<int>((pos.x - zmap.xMin) / zmap.cellW());
-        int yi = static_cast<int>((pos.y - zmap.yMin) / zmap.cellH());
-        xi = std::max(0, std::min(zmap.xRes - 1, xi));
-        yi = std::max(0, std::min(zmap.yRes - 1, yi));
+        int xi = static_cast<int>(std::max(0.0,
+                     std::min(static_cast<double>(zmap.xRes - 1),
+                              (pos.x - zmap.xMin) / zmap.cellW())));
+        int yi = static_cast<int>(std::max(0.0,
+                     std::min(static_cast<double>(zmap.yRes - 1),
+                              (pos.y - zmap.yMin) / zmap.cellH())));
         if (pos.z < zmap.at(xi, yi) - m_opts.gougeTol)
             return true;
     }
@@ -143,11 +149,16 @@ void Verify::subtractMove(const ToolpathPoint& from, const ToolpathPoint& to,
         double t   = static_cast<double>(s) / samps;
         Geom::Vec3 pos = from.position + dir * t;
 
-        // Find Z-map cells within tool radius
-        int xiMin = static_cast<int>((pos.x - toolR - zmap.xMin) / zmap.cellW());
-        int xiMax = static_cast<int>((pos.x + toolR - zmap.xMin) / zmap.cellW()) + 1;
-        int yiMin = static_cast<int>((pos.y - toolR - zmap.yMin) / zmap.cellH());
-        int yiMax = static_cast<int>((pos.y + toolR - zmap.yMin) / zmap.cellH()) + 1;
+        // Find Z-map cells within tool radius.
+        // Clamp the raw double values before casting to avoid UB on out-of-bounds coords.
+        int xiMin = static_cast<int>(std::max(0.0,
+                        (pos.x - toolR - zmap.xMin) / zmap.cellW()));
+        int xiMax = static_cast<int>(std::min(static_cast<double>(zmap.xRes - 1),
+                        (pos.x + toolR - zmap.xMin) / zmap.cellW())) + 1;
+        int yiMin = static_cast<int>(std::max(0.0,
+                        (pos.y - toolR - zmap.yMin) / zmap.cellH()));
+        int yiMax = static_cast<int>(std::min(static_cast<double>(zmap.yRes - 1),
+                        (pos.y + toolR - zmap.yMin) / zmap.cellH())) + 1;
 
         xiMin = std::max(0, xiMin);
         xiMax = std::min(zmap.xRes - 1, xiMax);
@@ -336,11 +347,13 @@ StockCompareResult StockCompare::compare(const ZMap& stock,
 double StockCompare::deviationAt(const StockCompareResult& result,
                                   const ZMap& stock,
                                   double worldX, double worldY) {
-    // Find the nearest cell index
-    int xi = static_cast<int>((worldX - stock.xMin) / stock.cellW());
-    int yi = static_cast<int>((worldY - stock.yMin) / stock.cellH());
-    xi = std::max(0, std::min(stock.xRes - 1, xi));
-    yi = std::max(0, std::min(stock.yRes - 1, yi));
+    // Find the nearest cell index; clamp before cast to avoid UB on large coords.
+    int xi = static_cast<int>(std::max(0.0,
+                 std::min(static_cast<double>(stock.xRes - 1),
+                          (worldX - stock.xMin) / stock.cellW())));
+    int yi = static_cast<int>(std::max(0.0,
+                 std::min(static_cast<double>(stock.yRes - 1),
+                          (worldY - stock.yMin) / stock.cellH())));
 
     std::size_t idx = static_cast<std::size_t>(yi * stock.xRes + xi);
     if (idx >= result.cells.size()) return 0.0;

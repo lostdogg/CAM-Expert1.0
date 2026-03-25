@@ -34,7 +34,8 @@ bool Application::initialize(HINSTANCE hInstance) {
     INITCOMMONCONTROLSEX icc{};
     icc.dwSize = sizeof(icc);
     icc.dwICC  = ICC_WIN95_CLASSES | ICC_BAR_CLASSES | ICC_TREEVIEW_CLASSES |
-                 ICC_LISTVIEW_CLASSES | ICC_TAB_CLASSES | ICC_COOL_CLASSES;
+                 ICC_LISTVIEW_CLASSES | ICC_TAB_CLASSES | ICC_COOL_CLASSES |
+                 ICC_UPDOWN_CLASS | ICC_PROGRESS_CLASS | ICC_STANDARD_CLASSES;
     InitCommonControlsEx(&icc);
 
     registerWindowClasses();
