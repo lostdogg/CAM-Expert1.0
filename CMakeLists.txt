@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(CAMExpert VERSION 1.0.0 LANGUAGES CXX)
+project(CAMExpert VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,6 +42,7 @@ set(SOURCES
     src/cam/ProbingCycles.cpp
     src/managers/ToolpathManager.cpp
     src/managers/SolidsManager.cpp
+    src/managers/SurfacesManager.cpp
     src/managers/LevelsManager.cpp
     src/managers/PlanesManager.cpp
     src/simulation/Backplot.cpp
@@ -91,6 +92,7 @@ set(HEADERS
     src/cam/ProbingCycles.h
     src/managers/ToolpathManager.h
     src/managers/SolidsManager.h
+    src/managers/SurfacesManager.h
     src/managers/LevelsManager.h
     src/managers/PlanesManager.h
     src/simulation/Backplot.h

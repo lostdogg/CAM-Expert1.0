@@ -1,6 +1,7 @@
 #include "Viewport3D.h"
 #include "../managers/ToolpathManager.h"
 #include "../managers/SolidsManager.h"
+#include "../managers/SurfacesManager.h"
 #include "../cad/BRep.h"
 #include <gl/gl.h>
 #include <gl/glu.h>
@@ -41,6 +42,12 @@ void Viewport3D::setToolpathManager(const ToolpathManager* mgr) {
 // --------------------------------------------------------------------------
 void Viewport3D::setSolidsManager(const SolidsManager* mgr) {
     m_solidsMgr = mgr;
+    redraw();
+}
+
+// --------------------------------------------------------------------------
+void Viewport3D::setSurfacesManager(const SurfacesManager* mgr) {
+    m_surfacesMgr = mgr;
     redraw();
 }
 
@@ -201,6 +208,7 @@ void Viewport3D::render() {
     drawAxes();
     drawStock();
     drawSolids();
+    drawSurfaces();
     drawToolpaths();
 
     SwapBuffers(m_hDC);
@@ -384,6 +392,108 @@ void Viewport3D::drawSolids() {
 
         glLineWidth(1.0f);
         glEnable(GL_LIGHTING);
+    }
+}
+
+// --------------------------------------------------------------------------
+// Draw all NURBS surfaces as tessellated triangle meshes.
+// In Wireframe mode each surface is drawn as a 20×20 parameter-space grid.
+// In Shaded / Translucent mode triangles are filled using the surface normal
+// for per-face lighting, with a distinct teal/cyan colour to distinguish
+// surfaces from solid bodies.
+void Viewport3D::drawSurfaces() {
+    if (!m_surfacesMgr || m_surfacesMgr->count() == 0) return;
+
+    const int RES = 20; // tessellation resolution (RES × RES quads)
+
+    for (int si = 0; si < m_surfacesMgr->count(); ++si) {
+        const SurfaceEntry& entry = m_surfacesMgr->at(si);
+        if (!entry.visible) continue;
+
+        const NurbsSurface& surf = entry.surface;
+
+        double uMin = surf.uMin(), uMax = surf.uMax();
+        double vMin = surf.vMin(), vMax = surf.vMax();
+
+        if (m_renderMode == RenderMode::Wireframe) {
+            // U-isolines
+            glDisable(GL_LIGHTING);
+            glColor3f(0.0f, 0.7f, 0.8f);  // cyan-teal
+            glLineWidth(1.2f);
+            for (int i = 0; i <= RES; ++i) {
+                double u = uMin + (uMax - uMin) * i / RES;
+                glBegin(GL_LINE_STRIP);
+                for (int j = 0; j <= RES; ++j) {
+                    double v = vMin + (vMax - vMin) * j / RES;
+                    Geom::Vec3 p = surf.evaluate(u, v);
+                    glVertex3d(p.x, p.y, p.z);
+                }
+                glEnd();
+            }
+            // V-isolines
+            for (int j = 0; j <= RES; ++j) {
+                double v = vMin + (vMax - vMin) * j / RES;
+                glBegin(GL_LINE_STRIP);
+                for (int i = 0; i <= RES; ++i) {
+                    double u = uMin + (uMax - uMin) * i / RES;
+                    Geom::Vec3 p = surf.evaluate(u, v);
+                    glVertex3d(p.x, p.y, p.z);
+                }
+                glEnd();
+            }
+        } else {
+            // Shaded / Translucent – tessellate into GL_TRIANGLES
+            if (m_renderMode == RenderMode::Translucent) {
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                glColor4f(0.0f, 0.75f, 0.85f, 0.45f);
+            } else {
+                glColor3f(0.0f, 0.75f, 0.85f);
+            }
+            glEnable(GL_LIGHTING);
+
+            // Teal-ish material for surfaces
+            GLfloat diff[]   = { 0.0f, 0.70f, 0.80f, m_renderMode == RenderMode::Translucent ? 0.45f : 1.0f };
+            GLfloat spec[]   = { 0.5f, 0.9f,  1.0f,  1.0f };
+            GLfloat shininess = 64.0f;
+            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, diff);
+            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, spec);
+            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, shininess);
+
+            glBegin(GL_TRIANGLES);
+            for (int i = 0; i < RES; ++i) {
+                double u0 = uMin + (uMax - uMin) *  i      / RES;
+                double u1 = uMin + (uMax - uMin) * (i + 1) / RES;
+                for (int j = 0; j < RES; ++j) {
+                    double v0 = vMin + (vMax - vMin) *  j      / RES;
+                    double v1 = vMin + (vMax - vMin) * (j + 1) / RES;
+
+                    Geom::Vec3 p00 = surf.evaluate(u0, v0);
+                    Geom::Vec3 p10 = surf.evaluate(u1, v0);
+                    Geom::Vec3 p01 = surf.evaluate(u0, v1);
+                    Geom::Vec3 p11 = surf.evaluate(u1, v1);
+
+                    Geom::Vec3 n00 = surf.normal(u0, v0);
+                    Geom::Vec3 n10 = surf.normal(u1, v0);
+                    Geom::Vec3 n01 = surf.normal(u0, v1);
+                    Geom::Vec3 n11 = surf.normal(u1, v1);
+
+                    // Triangle 1: p00, p10, p11
+                    glNormal3d(n00.x, n00.y, n00.z); glVertex3d(p00.x, p00.y, p00.z);
+                    glNormal3d(n10.x, n10.y, n10.z); glVertex3d(p10.x, p10.y, p10.z);
+                    glNormal3d(n11.x, n11.y, n11.z); glVertex3d(p11.x, p11.y, p11.z);
+
+                    // Triangle 2: p00, p11, p01
+                    glNormal3d(n00.x, n00.y, n00.z); glVertex3d(p00.x, p00.y, p00.z);
+                    glNormal3d(n11.x, n11.y, n11.z); glVertex3d(p11.x, p11.y, p11.z);
+                    glNormal3d(n01.x, n01.y, n01.z); glVertex3d(p01.x, p01.y, p01.z);
+                }
+            }
+            glEnd();
+
+            if (m_renderMode == RenderMode::Translucent)
+                glDisable(GL_BLEND);
+        }
     }
 }
 

@@ -49,6 +49,24 @@ public:
         double dwellSec     = 0.0;       // dwell at bottom
     };
 
+    // Chamfer milling – follow a profile with the chamfer tool angled so the
+    // conical face produces the desired chamfer width at the part edge.
+    struct ChamferParams {
+        double chamferWidth  = 1.0;   // desired chamfer width at the part edge (mm)
+        double chamferAngle  = 45.0;  // chamfer half-angle in degrees
+        double depth         = 0.5;   // axial depth of cut (how deep the profile is followed)
+        double stockAllowance= 0.0;
+    };
+
+    // Thread milling – generates a single helical pass that cuts an internal
+    // or external thread using a multi-tooth thread mill.
+    struct ThreadMillParams {
+        double pitchMM       = 1.25;  // thread pitch (mm)
+        double majorDiameter = 12.0;  // thread major diameter (mm)
+        bool   internal      = true;  // true = internal thread (bore); false = external (boss)
+        int    passes        = 1;     // number of thread leads to mill (usually 1 for single-pass)
+    };
+
     // Factory methods – generate and return a complete Toolpath
     static Toolpath contour2D(const std::vector<Geom::Vec2>& profile,
                                const Contour2DParams& p,
@@ -68,6 +86,20 @@ public:
                               const DrillParams& p,
                               const CuttingTool& tool,
                               const CuttingParams& cuts);
+
+    // Chamfer milling along a 2-D profile at the specified chamfer angle.
+    static Toolpath chamfer(const std::vector<Geom::Vec2>& profile,
+                             const ChamferParams& p,
+                             const CuttingTool& tool,
+                             const CuttingParams& cuts);
+
+    // Helical thread milling for an internal or external thread.
+    // The thread is centred at `centre` (X,Y) and starts at `startZ`.
+    static Toolpath threadMill(const Geom::Vec2& centre,
+                                double startZ,
+                                const ThreadMillParams& p,
+                                const CuttingTool& tool,
+                                const CuttingParams& cuts);
 
 private:
     // Generate a single planar pass at a given Z, with optional lead-in/lead-out arcs

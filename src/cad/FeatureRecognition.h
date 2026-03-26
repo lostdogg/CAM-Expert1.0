@@ -36,6 +36,7 @@ struct RecognizedFeature {
     double      depth     = 0;   // axial depth
     double      width     = 0;   // slot width
     Geom::Vec3  axis      = {0, 0, 1}; // feature axis (default: Z)
+    Geom::Vec3  centre    = {0, 0, 0}; // centroid of the feature in world space
     int         floorFaceId = -1;
     std::vector<int> wallFaceIds;
     std::string description;
