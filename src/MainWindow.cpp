@@ -1549,10 +1549,14 @@ void MainWindow::prepSplit() {
 //   CAMX 1.0
 //   SOLID BOX name dx dy dz
 //   SOLID CYLINDER name radius height
-//   SOLID IMPORTED name vertex_count edge_count face_count
+//   SOLID GENERIC name vertex_count edge_count face_count
 //     V x y z           (vertex)
 //     E v0 v1 curved    (edge)
 //     F type nx ny nz edgeCount e0 e1 ...  (face)
+//   NURBS name uDeg vDeg nu nv
+//     KU k0 k1 ...       (U knot vector)
+//     KV k0 k1 ...       (V knot vector)
+//     CP x y z w         (control point + weight, row-major: u outer, v inner)
 //   TOOLPATH name strategy pointCount
 //     P motionCode x y z ax ay az
 //   END
@@ -1617,6 +1621,68 @@ void MainWindow::saveProjectCamx(const std::wstring& wpath) {
         }
     }
 
+    // --- NURBS Surfaces ---
+    if (m_surfacesMgr) {
+        for (int i = 0; i < m_surfacesMgr->count(); ++i) {
+            const SurfaceEntry& se = m_surfacesMgr->at(i);
+            const NurbsSurface& s  = se.surface;
+            const std::string&  nm = se.name.empty() ? "Surface" : se.name;
+
+            int nu = s.numCtrlU(), nv = s.numCtrlV();
+            // Count knot vectors (degree+1+controlPoints-1 = degree+controlPoints)
+            // They are stored in the surface; we write them out explicitly.
+            f << "NURBS " << nm
+              << " " << s.uDegree() << " " << s.vDegree()
+              << " " << nu << " " << nv << "\n";
+
+            // U knots
+            f << " KU";
+            double du = (s.uMax() - s.uMin()) / std::max(1, nu - s.uDegree());
+            // Reconstruct a clamped uniform knot vector from the degree and count
+            {
+                int degU = s.uDegree();
+                int nKnotsU = nu + degU + 1;
+                double uMin = s.uMin(), uMax = s.uMax();
+                for (int k = 0; k < nKnotsU; ++k) {
+                    double t;
+                    if (k <= degU)              t = uMin;
+                    else if (k >= nKnotsU - degU - 1) t = uMax;
+                    else t = uMin + (uMax - uMin) * (k - degU) / (nKnotsU - 2 * degU - 1);
+                    f << " " << t;
+                }
+            }
+            f << "\n";
+
+            // V knots
+            f << " KV";
+            {
+                int degV = s.vDegree();
+                int nKnotsV = nv + degV + 1;
+                double vMin = s.vMin(), vMax = s.vMax();
+                for (int k = 0; k < nKnotsV; ++k) {
+                    double t;
+                    if (k <= degV)              t = vMin;
+                    else if (k >= nKnotsV - degV - 1) t = vMax;
+                    else t = vMin + (vMax - vMin) * (k - degV) / (nKnotsV - 2 * degV - 1);
+                    f << " " << t;
+                }
+            }
+            f << "\n";
+
+            // Control points and weights (sample on the parameter grid)
+            double uStep = (nu > 1) ? (s.uMax() - s.uMin()) / (nu - 1) : 0.0;
+            double vStep = (nv > 1) ? (s.vMax() - s.vMin()) / (nv - 1) : 0.0;
+            for (int ui = 0; ui < nu; ++ui) {
+                double u = s.uMin() + ui * uStep;
+                for (int vi = 0; vi < nv; ++vi) {
+                    double v = s.vMin() + vi * vStep;
+                    Geom::Vec3 p = s.evaluate(u, v);
+                    f << " CP " << p.x << " " << p.y << " " << p.z << " 1.0\n";
+                }
+            }
+        }
+    }
+
     // --- Toolpaths ---
     if (m_toolpathMgr) {
         for (int i = 0; i < m_toolpathMgr->count(); ++i) {
@@ -1665,7 +1731,7 @@ void MainWindow::loadProjectCamx(const std::wstring& wpath) {
         return;
     }
 
-    int solidsLoaded = 0, toolpathsLoaded = 0;
+    int solidsLoaded = 0, toolpathsLoaded = 0, surfacesLoaded = 0;
 
     while (std::getline(f, line)) {
         if (line == "END") break;
@@ -1725,6 +1791,49 @@ void MainWindow::loadProjectCamx(const std::wstring& wpath) {
             m_solidsMgr->addSolid(std::move(solid));
             ++solidsLoaded;
 
+        } else if (token == "NURBS") {
+            // NURBS name uDeg vDeg nu nv
+            std::string name;
+            int uDeg, vDeg, nu, nv;
+            ss >> name >> uDeg >> vDeg >> nu >> nv;
+
+            // Read KU line
+            std::vector<double> knotsU, knotsV;
+            if (std::getline(f, line)) {
+                std::istringstream ku(line);
+                std::string tag; ku >> tag; // "KU"
+                double k;
+                while (ku >> k) knotsU.push_back(k);
+            }
+            // Read KV line
+            if (std::getline(f, line)) {
+                std::istringstream kv(line);
+                std::string tag; kv >> tag; // "KV"
+                double k;
+                while (kv >> k) knotsV.push_back(k);
+            }
+            // Read control points: nu × nv CP lines
+            std::vector<std::vector<Geom::Vec3>> cp(nu, std::vector<Geom::Vec3>(nv));
+            std::vector<std::vector<double>>     wt(nu, std::vector<double>(nv, 1.0));
+            for (int ui = 0; ui < nu; ++ui) {
+                for (int vi = 0; vi < nv; ++vi) {
+                    if (!std::getline(f, line)) break;
+                    std::istringstream ps(line);
+                    std::string tag; double x, y, z, w;
+                    ps >> tag >> x >> y >> z >> w;
+                    cp[ui][vi] = {x, y, z};
+                    wt[ui][vi] = w;
+                }
+            }
+
+            if (!knotsU.empty() && !knotsV.empty()) {
+                NurbsSurface surf(uDeg, vDeg,
+                                  std::move(knotsU), std::move(knotsV),
+                                  std::move(cp), std::move(wt));
+                m_surfacesMgr->addSurface(std::move(surf), name);
+                ++surfacesLoaded;
+            }
+
         } else if (token == "TOOLPATH") {
             std::string name;
             int strategy;
@@ -1762,8 +1871,8 @@ void MainWindow::loadProjectCamx(const std::wstring& wpath) {
 
     wchar_t msg[256] = {};
     std::swprintf(msg, 256,
-        L"Loaded: %d solid(s), %d toolpath(s)  ←  %ls",
-        solidsLoaded, toolpathsLoaded, wpath.c_str());
+        L"Loaded: %d solid(s), %d surface(s), %d toolpath(s)  ←  %ls",
+        solidsLoaded, surfacesLoaded, toolpathsLoaded, wpath.c_str());
     SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
 }
 

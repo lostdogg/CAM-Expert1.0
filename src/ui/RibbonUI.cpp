@@ -149,7 +149,14 @@ void RibbonUI::buildMachineTab() {
     tab.name = "Machine";
     RibbonGroup gen{"Generate", {
         {IDM_MACHINE_GEN_POCKET,  "2D Pocket",  "Generate a dynamic 2D pocket toolpath"},
-        {IDM_MACHINE_GEN_CONTOUR, "2D Contour", "Generate a dynamic 2D contour toolpath"}
+        {IDM_MACHINE_GEN_CONTOUR, "2D Contour", "Generate a dynamic 2D contour toolpath"},
+        {IDM_MACHINE_CHAMFER,     "Chamfer",    "Generate a chamfer toolpath"},
+        {IDM_MACHINE_THREAD,      "Thread Mill","Generate a thread milling toolpath"}
+    }};
+    RibbonGroup probe{"Probing", {
+        {IDM_MACHINE_PROBE_Z,     "Probe Z",    "Probe Z surface height"},
+        {IDM_MACHINE_PROBE_BORE,  "Probe Bore", "Probe bore / boss centre"},
+        {IDM_MACHINE_PROBE_CORNER,"Probe Corner","Probe a rectangular corner"}
     }};
     RibbonGroup ops{"Simulate", {
         {IDM_MACHINE_BACKPLOT, "Backplot",    "Run backplot animation"},
@@ -162,6 +169,7 @@ void RibbonUI::buildMachineTab() {
         {IDM_MACHINE_SUMMARY, "Summary", "Show machining time / length summary"}
     }};
     tab.groups.push_back(gen);
+    tab.groups.push_back(probe);
     tab.groups.push_back(ops);
     tab.groups.push_back(post);
     addTab(tab);
