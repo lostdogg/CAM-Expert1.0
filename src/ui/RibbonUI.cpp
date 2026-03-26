@@ -59,12 +59,21 @@ void RibbonUI::buildHomeTab() {
     RibbonTab tab;
     tab.name = "Home";
     RibbonGroup file{"File", {
-        {IDM_FILE_NEW,    "New",    "Create a new file"},
-        {IDM_FILE_OPEN,   "Open",   "Open an existing file"},
-        {IDM_FILE_SAVE,   "Save",   "Save the current file"},
-        {IDM_FILE_IMPORT, "Import", "Import a CAD file"}
+        {IDM_FILE_NEW,    "New",    "Create a new file [Ctrl+N]"},
+        {IDM_FILE_OPEN,   "Open",   "Open an existing file [Ctrl+O]"},
+        {IDM_FILE_SAVE,   "Save",   "Save the current file [Ctrl+S]"},
+        {IDM_FILE_IMPORT, "Import", "Import a CAD file [Ctrl+I]"}
+    }};
+    RibbonGroup edit{"Edit", {
+        {IDM_EDIT_UNDO,          "Undo",    "Undo last action [Ctrl+Z]"},
+        {IDM_EDIT_REDO,          "Redo",    "Redo last undone action [Ctrl+Y]"},
+        {IDM_EDIT_COPY,          "Copy",    "Copy selected entities [Ctrl+C]"},
+        {IDM_EDIT_PASTE,         "Paste",   "Paste entities [Ctrl+V]"},
+        {IDM_EDIT_DELETE,        "Delete",  "Remove selected entities [Del]"},
+        {IDM_TOGGLE_SELECT_MODE, "Sel Mode","Toggle selection/deselection mode [Space]"}
     }};
     tab.groups.push_back(file);
+    tab.groups.push_back(edit);
     addTab(tab);
 }
 
@@ -72,15 +81,21 @@ void RibbonUI::buildWireframeTab() {
     RibbonTab tab;
     tab.name = "Wireframe";
     RibbonGroup draw{"Draw", {
-        {IDM_WF_POINT,     "Point",     "Create a point"},
-        {IDM_WF_LINE,      "Line",      "Create a line segment"},
-        {IDM_WF_ARC,       "Arc",       "Create an arc (3-point)"},
-        {IDM_WF_CIRCLE,    "Circle",    "Create a circle"},
-        {IDM_WF_RECTANGLE, "Rectangle", "Create a rectangle"},
-        {IDM_WF_POLYGON,   "Polygon",   "Create a regular polygon"},
-        {IDM_WF_SPLINE,    "Spline",    "Create a NURBS spline"}
+        {IDM_WF_POINT,     "Point (P)",     "Create a point [P]"},
+        {IDM_WF_LINE,      "Line (L)",      "Create a line segment [L]"},
+        {IDM_WF_ARC,       "Arc (A)",       "Create an arc (3-point) [A]"},
+        {IDM_WF_CIRCLE,    "Circle (C)",    "Create a circle [C]"},
+        {IDM_WF_RECTANGLE, "Rectangle",     "Create a rectangle"},
+        {IDM_WF_POLYGON,   "Polygon",       "Create a regular polygon"},
+        {IDM_WF_SPLINE,    "Spline",        "Create a NURBS spline"}
+    }};
+    RibbonGroup xform{"Transform", {
+        {IDM_GEOM_MOVE,    "Move (M)",      "Move selected geometry [M]"},
+        {IDM_GEOM_ROTATE,  "Rotate (R)",    "Rotate selected geometry [R]"},
+        {IDM_GEOM_SCALE,   "Scale (S)",     "Scale selected geometry [S]"}
     }};
     tab.groups.push_back(draw);
+    tab.groups.push_back(xform);
     addTab(tab);
 }
 
@@ -170,15 +185,21 @@ void RibbonUI::buildMachineTab() {
         {IDM_MACHINE_SIM,      "Machine Sim", "Run machine simulation"}
     }};
     RibbonGroup post{"Output", {
-        {IDM_MACHINE_POST,    "Post",    "Generate G-code (post-process)"},
-        {IDM_MACHINE_REGEN,   "Regen",   "Regenerate all toolpaths (F5)"},
+        {IDM_MACHINE_POST,    "Post",    "Generate G-code (post-process) [Ctrl+P]"},
+        {IDM_MACHINE_REGEN,   "Regen",   "Regenerate all toolpaths"},
         {IDM_MACHINE_SUMMARY, "Summary", "Show machining time / length summary"}
+    }};
+    RibbonGroup toolpathMgr{"Manager", {
+        {IDM_TOOLPATH_MGR_TOGGLE,  "Manager [T]",     "Open Toolpath Manager [T]"},
+        {IDM_TOOLPATH_TOGGLE_DISP, "Show/Hide [C+S+T]","Toggle toolpath display [Ctrl+Shift+T]"},
+        {IDM_TOOLPATH_COPY_PARAMS, "Copy Params [C+S+C]","Copy toolpath parameters [Ctrl+Shift+C]"}
     }};
     tab.groups.push_back(gen2D);
     tab.groups.push_back(gen3D);
     tab.groups.push_back(probe);
     tab.groups.push_back(ops);
     tab.groups.push_back(post);
+    tab.groups.push_back(toolpathMgr);
     addTab(tab);
 }
 
@@ -200,11 +221,17 @@ void RibbonUI::buildViewTab() {
         {IDM_VIEW_LEFT,      "Left",   "Left view"}
     }};
     RibbonGroup fit{"Zoom", {
-        {IDM_VIEW_FIT, "Fit All", "Fit all geometry in view"}
+        {IDM_VIEW_ZOOM_SELECTED, "Zoom Sel", "Zoom to selected entities [F2]"},
+        {IDM_VIEW_FIT,           "Fit All",  "Fit all geometry in view [F3]"}
+    }};
+    RibbonGroup toggles{"Display Toggles", {
+        {IDM_VIEW_TOGGLE_GRID,   "Grid [F4]",   "Toggle grid display [F4]"},
+        {IDM_VIEW_TOGGLE_GNOMON, "Gnomon [F5]", "Toggle dynamic gnomon [F5]"}
     }};
     tab.groups.push_back(mode);
     tab.groups.push_back(view);
     tab.groups.push_back(fit);
+    tab.groups.push_back(toggles);
     addTab(tab);
 }
 
@@ -213,7 +240,7 @@ void RibbonUI::buildCopilotTab() {
     RibbonTab tab;
     tab.name = "Copilot";
     RibbonGroup panel{"Panel", {
-        {IDM_COPILOT_TOGGLE, "Toggle Copilot", "Show or hide the AI Copilot panel (F1)"}
+        {IDM_COPILOT_TOGGLE, "Toggle Copilot", "Show or hide the AI Copilot panel"}
     }};
     tab.groups.push_back(panel);
     addTab(tab);

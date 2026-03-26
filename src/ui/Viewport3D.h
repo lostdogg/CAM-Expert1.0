@@ -40,6 +40,9 @@ public:
 
     void setRenderMode(RenderMode mode);
     void setView(ViewPreset preset);
+    void zoomSelected();             // F2 – zoom to fit any selected / visible geometry
+    void toggleGrid();               // F4 – show/hide the ground grid
+    void toggleGnomon();             // F5 – show/hide the dynamic gnomon (axes triad)
 
     // Provide a toolpath manager so the viewport can render toolpaths.
     // The pointer is non-owning; caller is responsible for lifetime.
@@ -54,6 +57,8 @@ public:
     void setSurfacesManager(const SurfacesManager* mgr);
 
     RenderMode renderMode() const { return m_renderMode; }
+    bool       gridVisible()   const { return m_showGrid; }
+    bool       gnomonVisible() const { return m_showGnomon; }
     HWND hwnd() const { return m_hwnd; }
 
 private:
@@ -89,10 +94,20 @@ private:
     bool  m_rightDown = false;
     int   m_lastMouseX = 0, m_lastMouseY = 0;
 
+    // Spin inertia (applied via WM_TIMER after a fast left-drag or wheel rotation)
+    float       m_spinVelX      = 0.0f;
+    float       m_spinVelY      = 0.0f;
+    UINT_PTR    m_inertiaTimer  = 0;
+    static constexpr UINT_PTR kInertiaTimerId = 1;
+    static constexpr float    kInertiaDamping = 0.88f;  // velocity multiplied each tick
+    static constexpr float    kInertiaStop    = 0.05f;  // velocity below this stops the timer
+
     HWND                   m_hwnd        = nullptr;
     HDC                    m_hDC         = nullptr;
     HGLRC                  m_hGLRC       = nullptr;
     RenderMode             m_renderMode  = RenderMode::Shaded;
+    bool                   m_showGrid    = true;   // toggled by F4
+    bool                   m_showGnomon  = true;   // toggled by F5
     const ToolpathManager* m_toolpathMgr = nullptr;  // non-owning
     const SolidsManager*   m_solidsMgr   = nullptr;  // non-owning
     const SurfacesManager* m_surfacesMgr = nullptr;  // non-owning
