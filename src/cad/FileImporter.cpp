@@ -9,7 +9,8 @@
 // Helpers
 // --------------------------------------------------------------------------
 static std::string toLower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+    std::transform(s.begin(), s.end(), s.begin(),
+        [](unsigned char c) { return static_cast<char>(::tolower(c)); });
     return s;
 }
 
@@ -324,24 +325,24 @@ ImportResult FileImporter::importOBJ(const std::string& path) {
 // --------------------------------------------------------------------------
 // Native format stubs – production builds use vendor SDK bridges
 // --------------------------------------------------------------------------
-ImportResult FileImporter::importSolidWorks(const std::string& path) {
+ImportResult FileImporter::importSolidWorks(const std::string& /*path*/) {
     m_lastError = "SolidWorks import requires SolidWorks SDK (eDrawings).";
     auto solid = BRep::Solid::makeBox(100.0, 50.0, 25.0);
     solid.setName("SolidWorks_Stub");
     return solid;
 }
 
-ImportResult FileImporter::importAutoCAD(const std::string& path) {
+ImportResult FileImporter::importAutoCAD(const std::string& /*path*/) {
     m_lastError = "AutoCAD DWG/DXF import requires ODA library.";
     return BRep::Solid{};
 }
 
-ImportResult FileImporter::importInventor(const std::string& path) {
+ImportResult FileImporter::importInventor(const std::string& /*path*/) {
     m_lastError = "Inventor import requires Autodesk SDK.";
     return BRep::Solid{};
 }
 
-ImportResult FileImporter::importSiemensNX(const std::string& path) {
+ImportResult FileImporter::importSiemensNX(const std::string& /*path*/) {
     m_lastError = "Siemens NX import requires NX Open API.";
     return BRep::Solid{};
 }
