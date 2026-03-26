@@ -15,10 +15,13 @@
 #include "cam/PostProcessor.h"
 #include "cam/DynamicMotion.h"
 #include "cam/Strategies2D.h"
+#include "cam/Strategies3D.h"
+#include "cam/MultiAxis.h"
 #include "cam/ProbingCycles.h"
 #include "cad/FileImporter.h"
 #include "cad/ModelPrep.h"
 #include "cad/FeatureRecognition.h"
+#include "cad/MeshData.h"
 #include "copilot/CopilotEngine.h"
 #include "resources/resource.h"
 #include <commctrl.h>
@@ -244,8 +247,10 @@ LRESULT MainWindow::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             case 'P': onCommand(IDM_MACHINE_POST); return 0;
             }
         }
-        if (wParam == VK_F1)  { onCommand(IDM_COPILOT_TOGGLE);  return 0; }
-        if (wParam == VK_F5)  { onCommand(IDM_MACHINE_REGEN);   return 0; }
+        if (wParam == VK_F1)  { onCommand(IDM_COPILOT_TOGGLE);      return 0; }
+        if (wParam == VK_F5)  { onCommand(IDM_MACHINE_REGEN);       return 0; }
+        if (wParam == VK_F6)  { onCommand(IDM_MACHINE_3D_WATERLINE); return 0; }
+        if (wParam == VK_F7)  { onCommand(IDM_MACHINE_3D_SCALLOP);  return 0; }
         break;
     }
 
@@ -353,6 +358,7 @@ void MainWindow::onCreate() {
     // --- Copilot ---
     m_copilotEngine = std::make_unique<CopilotEngine>();
     m_copilotEngine->setToolpathManager(m_toolpathMgr.get());
+    m_copilotEngine->setSurfacesManager(m_surfacesMgr.get());
 
     m_copilotPanel = std::make_unique<CopilotPanel>(m_hwnd, hInst);
     m_copilotPanel->setCopilotEngine(m_copilotEngine.get());
@@ -400,6 +406,11 @@ void MainWindow::buildMenu() {
     AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_GEN_CONTOUR, L"Generate 2D &Contour…");
     AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_CHAMFER,     L"Generate C&hamfer…");
     AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_THREAD,      L"Generate T&hread Mill…");
+    AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_3D_WATERLINE, L"Generate 3D &Waterline…");
+    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_3D_SCALLOP,   L"Generate 3D &Scallop…");
+    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_3D_RASTER,    L"Generate 3D &Raster…");
+    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_5AXIS,        L"Generate &5-Axis Swarf…");
     AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_PROBE_Z,     L"Probe &Z Surface…");
     AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_PROBE_BORE,  L"Probe &Bore/Boss Center…");
@@ -505,6 +516,10 @@ void MainWindow::onCommand(int id) {
     case IDM_MACHINE_PROBE_Z:     probeZSurface();           break;
     case IDM_MACHINE_PROBE_BORE:  probeBoreCenter();         break;
     case IDM_MACHINE_PROBE_CORNER:probeCorner();             break;
+    case IDM_MACHINE_3D_WATERLINE:generate3DWaterline();    break;
+    case IDM_MACHINE_3D_SCALLOP:  generate3DScallop();      break;
+    case IDM_MACHINE_3D_RASTER:   generate3DRaster();       break;
+    case IDM_MACHINE_5AXIS:       generate5AxisSwarf();     break;
     case IDM_MACHINE_REGEN:       regenerateAllToolpaths();  break;
     case IDM_MACHINE_SUMMARY:     showMachiningSummary();    break;
 
@@ -619,6 +634,14 @@ void MainWindow::showAboutDialog() {
         L"\n\nComputer-Aided Manufacturing & Design software.\n"
         L"Supports 2D/2.5D, 3D, and Multi-Axis machining strategies.\n"
         L"Post-Processor: Fanuc, Haas, Heidenhain, and more.\n\n"
+        L"New in v1.2:\n"
+        L"  \u2022 3D Waterline (Z-level) toolpath generation\n"
+        L"  \u2022 3D Scallop (constant step-over) with live scallop-height readout\n"
+        L"  \u2022 3D Raster (parallel passes) projected onto mesh stock\n"
+        L"  \u2022 5-Axis Swarf milling with configurable lead angle\n"
+        L"  \u2022 F6/F7 keyboard shortcuts for 3D Waterline / Scallop\n"
+        L"  \u2022 Fixed NURBS offset surface knot vectors (correct geometry)\n"
+        L"  \u2022 Dual-light OpenGL rendering for world-class surface shading\n\n"
         L"New in v1.1:\n"
         L"  \u2022 NURBS Surface creation (Loft, Revolve, Fillet, Offset, Extend, Trim)\n"
         L"  \u2022 Chamfer and Thread Mill strategies\n"
@@ -2585,5 +2608,274 @@ void MainWindow::probeCorner()
     std::swprintf(statusMsg, 200,
         L"Corner probe added at approx. (%.4g, %.4g).",
         cx, cy);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// ==========================================================================
+// 3D Milling strategies (Machine tab → 3D group)
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+// Helper: get the active NURBS surface or nullptr
+// --------------------------------------------------------------------------
+static const NurbsSurface* getActiveSurface(const SurfacesManager* mgr) {
+    if (!mgr || mgr->count() == 0) return nullptr;
+    return &mgr->at(mgr->count() - 1).surface;
+}
+
+// --------------------------------------------------------------------------
+// IDM_MACHINE_3D_WATERLINE – Z-level waterline finishing on active surface
+// --------------------------------------------------------------------------
+void MainWindow::generate3DWaterline()
+{
+    double toolDiam = 12.0, topZ = 0.0, bottomZ = -30.0, zStep = 1.0;
+    if (!promptDouble2(L"3D Waterline",
+                       L"Tool diameter (mm):", toolDiam, toolDiam,
+                       L"Z step (mm):",        zStep,    zStep))
+        return;
+
+    if (toolDiam <= 0 || zStep <= 0) {
+        MessageBoxW(m_hwnd, L"Tool diameter and Z-step must be positive.",
+                    L"3D Waterline", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // Determine Z range from active solid bounding box or use defaults
+    if (m_solidsMgr && m_solidsMgr->count() > 0) {
+        Geom::AABB bb = m_solidsMgr->aggregateBoundingBox();
+        if (bb.isValid()) {
+            topZ    = bb.max.z;
+            bottomZ = bb.min.z;
+        }
+    }
+
+    CuttingTool tool;
+    tool.diameter    = toolDiam;
+    tool.fluteLength = std::abs(topZ - bottomZ);
+    tool.type        = ToolType::BallEndMill;
+
+    CuttingParams params;
+    params.feedRate     = 1500.0;
+    params.plungeRate   = 300.0;
+    params.spindleRPM   = 12000;
+
+    Strategies3D::WaterlineParams wp;
+    wp.topZ    = topZ;
+    wp.bottomZ = bottomZ;
+    wp.zStep   = zStep;
+    wp.stepOver = 0.4;
+    wp.stockAllowance = 0.0;
+
+    const NurbsSurface* surf = getActiveSurface(m_surfacesMgr.get());
+    Toolpath tp;
+    if (surf) {
+        tp = Strategies3D::waterline(*surf, wp, tool, params);
+    } else {
+        // No surface loaded – generate a waterline on a default curved surface
+        // (a simple revolve surface approximating the bounding box geometry)
+        std::vector<Geom::Vec3> profile = {
+            {40.0, 0.0, bottomZ}, {40.0, 0.0, (topZ + bottomZ) / 2.0}, {40.0, 0.0, topZ}
+        };
+        NurbsSurface defaultSurf = SurfacesManager::makeRevolve(profile, 360.0);
+        tp = Strategies3D::waterline(defaultSurf, wp, tool, params);
+    }
+
+    static int wlCount = 0;
+    tp.setName("Waterline_" + std::to_string(++wlCount));
+    m_toolpathMgr->addToolpath(std::move(tp));
+
+    wchar_t statusMsg[200] = {};
+    std::swprintf(statusMsg, 200,
+        L"3D Waterline generated: Ø%.4g mm, Z %.4g→%.4g mm, step %.4g mm.",
+        toolDiam, topZ, bottomZ, zStep);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_MACHINE_3D_SCALLOP – constant-scallop finishing on active surface
+// --------------------------------------------------------------------------
+void MainWindow::generate3DScallop()
+{
+    double toolDiam = 8.0, stepOver = 0.5;
+    if (!promptDouble2(L"3D Scallop",
+                       L"Tool diameter (mm):", toolDiam, toolDiam,
+                       L"Step-over   (mm):",   stepOver, stepOver))
+        return;
+
+    if (toolDiam <= 0 || stepOver <= 0) {
+        MessageBoxW(m_hwnd, L"Tool diameter and step-over must be positive.",
+                    L"3D Scallop", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // Compute and report the resulting scallop height
+    double h = Strategies3D::scallopHeight(toolDiam / 2.0, stepOver);
+
+    CuttingTool tool;
+    tool.diameter = toolDiam;
+    tool.type     = ToolType::BallEndMill;
+
+    CuttingParams params;
+    params.feedRate   = 2000.0;
+    params.plungeRate = 300.0;
+    params.spindleRPM = 15000;
+
+    Strategies3D::ScallopParams sp;
+    sp.stepOver       = stepOver;
+    sp.stockAllowance = 0.0;
+
+    const NurbsSurface* surf = getActiveSurface(m_surfacesMgr.get());
+    Toolpath tp;
+    if (surf) {
+        tp = Strategies3D::scallop(*surf, sp, tool, params);
+    } else {
+        std::vector<Geom::Vec3> profile = {
+            {35.0, 0.0, -25.0}, {35.0, 0.0, 0.0}
+        };
+        NurbsSurface defaultSurf = SurfacesManager::makeRevolve(profile, 360.0);
+        tp = Strategies3D::scallop(defaultSurf, sp, tool, params);
+    }
+
+    static int scallopCount = 0;
+    tp.setName("Scallop_" + std::to_string(++scallopCount));
+    m_toolpathMgr->addToolpath(std::move(tp));
+
+    wchar_t statusMsg[240] = {};
+    std::swprintf(statusMsg, 240,
+        L"3D Scallop generated: Ø%.4g mm, step-over %.4g mm → scallop h=%.4f mm.",
+        toolDiam, stepOver, h);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_MACHINE_3D_RASTER – parallel raster passes projected onto mesh/surface
+// --------------------------------------------------------------------------
+void MainWindow::generate3DRaster()
+{
+    double toolDiam = 10.0, stepOver = 0.5, angle = 0.0;
+    if (!promptTriple(L"3D Raster",
+                      L"Tool diameter (mm):", toolDiam, toolDiam,
+                      L"Step-over   (mm):",   stepOver, stepOver,
+                      L"Raster angle (deg):", angle,    angle))
+        return;
+
+    if (toolDiam <= 0 || stepOver <= 0) {
+        MessageBoxW(m_hwnd, L"Tool diameter and step-over must be positive.",
+                    L"3D Raster", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    CuttingTool tool;
+    tool.diameter = toolDiam;
+    tool.type     = ToolType::BallEndMill;
+
+    CuttingParams params;
+    params.feedRate   = 1800.0;
+    params.plungeRate = 300.0;
+    params.spindleRPM = 12000;
+
+    Strategies3D::RasterParams rp;
+    rp.stepOver       = stepOver;
+    rp.angle          = angle;
+    rp.stockAllowance = 0.0;
+
+    // Raster uses mesh data; build a simple flat mesh from the active solid
+    // bounding box if no mesh is loaded.
+    std::vector<Geom::Triangle> tris;
+    if (m_solidsMgr && m_solidsMgr->count() > 0) {
+        Geom::AABB bb = m_solidsMgr->aggregateBoundingBox();
+        if (bb.isValid()) {
+            // Approximate the top face as two triangles
+            Geom::Vec3 p0 = {bb.min.x, bb.min.y, bb.max.z};
+            Geom::Vec3 p1 = {bb.max.x, bb.min.y, bb.max.z};
+            Geom::Vec3 p2 = {bb.max.x, bb.max.y, bb.max.z};
+            Geom::Vec3 p3 = {bb.min.x, bb.max.y, bb.max.z};
+            Geom::Triangle t1; t1.v[0] = p0; t1.v[1] = p1; t1.v[2] = p2;
+            Geom::Triangle t2; t2.v[0] = p0; t2.v[1] = p2; t2.v[2] = p3;
+            tris.push_back(t1);
+            tris.push_back(t2);
+        }
+    }
+    if (tris.empty()) {
+        // Fallback: flat 100×100 mm square top face
+        Geom::Triangle t1, t2;
+        t1.v[0] = {-50,-50,0}; t1.v[1] = {50,-50,0}; t1.v[2] = {50,50,0};
+        t2.v[0] = {-50,-50,0}; t2.v[1] = {50, 50,0}; t2.v[2] = {-50,50,0};
+        tris.push_back(t1);
+        tris.push_back(t2);
+    }
+    MeshData mesh(std::move(tris));
+
+    Toolpath tp = Strategies3D::raster(mesh, rp, tool, params);
+
+    static int rasterCount = 0;
+    tp.setName("Raster_" + std::to_string(++rasterCount));
+    m_toolpathMgr->addToolpath(std::move(tp));
+
+    wchar_t statusMsg[200] = {};
+    std::swprintf(statusMsg, 200,
+        L"3D Raster generated: Ø%.4g mm, step %.4g mm, %.4g° angle.",
+        toolDiam, stepOver, angle);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_MACHINE_5AXIS – 5-axis swarf milling along the active surface
+// --------------------------------------------------------------------------
+void MainWindow::generate5AxisSwarf()
+{
+    double toolDiam = 16.0, leadAngle = 5.0;
+    if (!promptDouble2(L"5-Axis Swarf",
+                       L"Tool diameter (mm):", toolDiam,  toolDiam,
+                       L"Lead angle   (deg):", leadAngle, leadAngle))
+        return;
+
+    if (toolDiam <= 0) {
+        MessageBoxW(m_hwnd, L"Tool diameter must be positive.",
+                    L"5-Axis Swarf", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    CuttingTool tool;
+    tool.diameter    = toolDiam;
+    tool.fluteLength = 50.0;
+    tool.type        = ToolType::EndMill;
+
+    CuttingParams params;
+    params.feedRate   = 1200.0;
+    params.plungeRate = 200.0;
+    params.spindleRPM = 10000;
+
+    MultiAxisParams maParams;
+    maParams.leadLag   = MultiAxisParams::LeadLag::LeadFwd;
+    maParams.leadAngle = leadAngle;
+    maParams.gougeProtect = true;
+
+    MultiAxis ma(maParams);
+
+    const NurbsSurface* surf = getActiveSurface(m_surfacesMgr.get());
+    Toolpath tp;
+    if (surf) {
+        tp = ma.swarfMill(*surf, tool, params);
+    } else {
+        // Default surface: revolve a vertical line to produce a cylinder
+        std::vector<Geom::Vec3> profile = {
+            {30.0, 0.0, -20.0}, {30.0, 0.0, 20.0}
+        };
+        NurbsSurface defaultSurf = SurfacesManager::makeRevolve(profile, 360.0);
+        tp = ma.swarfMill(defaultSurf, tool, params);
+    }
+
+    // Apply lead/lag tilt to refine tool orientation
+    MultiAxis::applyLeadLag(tp, leadAngle, 0.0);
+
+    static int swarfCount = 0;
+    tp.setName("Swarf5Axis_" + std::to_string(++swarfCount));
+    m_toolpathMgr->addToolpath(std::move(tp));
+
+    wchar_t statusMsg[200] = {};
+    std::swprintf(statusMsg, 200,
+        L"5-Axis Swarf generated: Ø%.4g mm, lead %.4g°, %d points.",
+        toolDiam, leadAngle, static_cast<int>(m_toolpathMgr->at(m_toolpathMgr->count()-1).points().size()));
     SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
 }

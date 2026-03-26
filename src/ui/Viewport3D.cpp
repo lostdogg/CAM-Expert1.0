@@ -76,20 +76,32 @@ bool Viewport3D::initOpenGL() {
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_LIGHTING);
     glEnable(GL_LIGHT0);
+    glEnable(GL_LIGHT1);   // secondary fill light for world-class shading
     glEnable(GL_COLOR_MATERIAL);
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
     glShadeModel(GL_SMOOTH);
 
-    float ambient[]  = {0.2f, 0.2f, 0.2f, 1.0f};
-    float diffuse[]  = {0.8f, 0.8f, 0.8f, 1.0f};
-    float specular[] = {0.4f, 0.4f, 0.4f, 1.0f};
-    float lightPos[] = {100.0f, 200.0f, 300.0f, 1.0f};
+    // Primary key light (upper-right front)
+    float ambient[]   = {0.18f, 0.18f, 0.20f, 1.0f};
+    float diffuse[]   = {0.85f, 0.85f, 0.85f, 1.0f};
+    float specular[]  = {0.50f, 0.50f, 0.50f, 1.0f};
+    float lightPos[]  = {100.0f, 200.0f, 300.0f, 1.0f};
     glLightfv(GL_LIGHT0, GL_AMBIENT,  ambient);
     glLightfv(GL_LIGHT0, GL_DIFFUSE,  diffuse);
     glLightfv(GL_LIGHT0, GL_SPECULAR, specular);
     glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
 
-    glClearColor(0.18f, 0.18f, 0.22f, 1.0f); // dark grey background
+    // Secondary fill light (lower-left back, cooler, dimmer)
+    float fillAmbient[]  = {0.0f,  0.0f,  0.0f,  1.0f};
+    float fillDiffuse[]  = {0.28f, 0.30f, 0.38f, 1.0f}; // slightly blue-tinted
+    float fillSpecular[] = {0.0f,  0.0f,  0.0f,  1.0f};
+    float fillPos[]      = {-150.0f, -100.0f, -80.0f, 1.0f};
+    glLightfv(GL_LIGHT1, GL_AMBIENT,  fillAmbient);
+    glLightfv(GL_LIGHT1, GL_DIFFUSE,  fillDiffuse);
+    glLightfv(GL_LIGHT1, GL_SPECULAR, fillSpecular);
+    glLightfv(GL_LIGHT1, GL_POSITION, fillPos);
+
+    glClearColor(0.16f, 0.17f, 0.21f, 1.0f); // deep blue-grey background
 
     return true;
 }

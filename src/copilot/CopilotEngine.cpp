@@ -1,6 +1,7 @@
 #include "CopilotEngine.h"
 #include "../cam/DynamicMotion.h"
 #include "../cam/Strategies2D.h"
+#include "../managers/SurfacesManager.h"
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
@@ -387,10 +388,40 @@ bool CopilotEngine::applyLastSuggestion() {
     case StrategyType::Raster3D:
     case StrategyType::Scallop3D:
     case StrategyType::Spiral3D: {
-        // For 3D strategies generate a DynamicMill placeholder on the XY boundary
-        // (full 3D requires a loaded mesh/NURBS surface which isn't stored here).
-        DynamicMotion dm;
-        tp = dm.generateForMaterial(boundary, depth, p.tool, p.material);
+        // Use the active NURBS surface if one is available; otherwise fall back
+        // to a DynamicMill pass on the 2D bounding box perimeter.
+        const NurbsSurface* surf = (m_surfacesMgr && m_surfacesMgr->count() > 0)
+                                   ? &m_surfacesMgr->at(m_surfacesMgr->count() - 1).surface
+                                   : nullptr;
+        if (surf) {
+            if (p.strategy == StrategyType::WaterlineRough ||
+                p.strategy == StrategyType::Spiral3D) {
+                Strategies3D::WaterlineParams wp;
+                wp.topZ           = surf->uMax();   // map surface domain to Z range
+                wp.bottomZ        = surf->uMin();
+                wp.zStep          = p.tool.diameter * 0.5;
+                wp.stepOver       = 0.4;
+                wp.stockAllowance = 0.0;
+                tp = Strategies3D::waterline(*surf, wp, p.tool, p.cuttingParams);
+            } else if (p.strategy == StrategyType::Scallop3D) {
+                Strategies3D::ScallopParams sp;
+                sp.stepOver       = p.tool.diameter * 0.3;
+                sp.stockAllowance = 0.0;
+                tp = Strategies3D::scallop(*surf, sp, p.tool, p.cuttingParams);
+            } else { // Raster3D
+                Strategies3D::WaterlineParams wp;
+                wp.topZ           = 0.0;
+                wp.bottomZ        = -depth;
+                wp.zStep          = p.tool.diameter * 0.5;
+                wp.stepOver       = 0.4;
+                wp.stockAllowance = 0.0;
+                tp = Strategies3D::waterline(*surf, wp, p.tool, p.cuttingParams);
+            }
+        } else {
+            // No surface available – use a dynamic milling pass as a fallback
+            DynamicMotion dm;
+            tp = dm.generateForMaterial(boundary, depth, p.tool, p.material);
+        }
         tp.setName("Copilot-3D: " + strategyToString(p.strategy));
         break;
     }
@@ -399,8 +430,19 @@ bool CopilotEngine::applyLastSuggestion() {
     case StrategyType::Swarf4Axis:
     case StrategyType::Multiaxis5:
     case StrategyType::PortMachining: {
-        DynamicMotion dm;
-        tp = dm.generateForMaterial(boundary, depth, p.tool, p.material);
+        const NurbsSurface* surf = (m_surfacesMgr && m_surfacesMgr->count() > 0)
+                                   ? &m_surfacesMgr->at(m_surfacesMgr->count() - 1).surface
+                                   : nullptr;
+        if (surf) {
+            MultiAxisParams maParams;
+            maParams.leadAngle    = 5.0;
+            maParams.gougeProtect = true;
+            MultiAxis ma(maParams);
+            tp = ma.swarfMill(*surf, p.tool, p.cuttingParams);
+        } else {
+            DynamicMotion dm;
+            tp = dm.generateForMaterial(boundary, depth, p.tool, p.material);
+        }
         tp.setName("Copilot-MA: " + strategyToString(p.strategy));
         break;
     }

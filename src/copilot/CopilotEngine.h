@@ -13,7 +13,10 @@
 #include "SelfCorrectionLoop.h"
 #include "../cam/MaterialLibrary.h"
 #include "../cam/DynamicMotion.h"
+#include "../cam/Strategies3D.h"
+#include "../cam/MultiAxis.h"
 #include "../managers/ToolpathManager.h"
+#include "../managers/SurfacesManager.h"
 #include "../cad/FeatureRecognition.h"
 #include "../simulation/Verify.h"
 #include <string>
@@ -72,6 +75,9 @@ public:
 
     // Provide a pointer to the live ToolpathManager (read + write for Apply).
     void setToolpathManager(ToolpathManager* mgr)          { m_toolpathMgr = mgr; }
+
+    // Provide a pointer to the live SurfacesManager (read-only, for 3D strategies).
+    void setSurfacesManager(const SurfacesManager* mgr)    { m_surfacesMgr = mgr; }
 
     // Provide the MaterialLibrary (the engine never owns it).
     void setMaterialLibrary(const MaterialLibrary* lib)    { m_matLib = lib; }
@@ -170,6 +176,7 @@ private:
 
     // --- Live pointers (not owned) ---
     ToolpathManager*               m_toolpathMgr = nullptr;
+    const SurfacesManager*         m_surfacesMgr = nullptr;
     const MaterialLibrary*         m_matLib      = nullptr;
     const VerifyResult*            m_lastVerify  = nullptr;
     std::vector<RecognizedFeature> m_features;
