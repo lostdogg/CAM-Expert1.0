@@ -2866,7 +2866,7 @@ void MainWindow::generate5AxisSwarf()
         tp = ma.swarfMill(defaultSurf, tool, params);
     }
 
-    // Apply lead/lag tilt to refine tool orientation
+    // Apply lead/lag tilt: leadAngle° forward tilt, 0° lag (no backward tilt).
     MultiAxis::applyLeadLag(tp, leadAngle, 0.0);
 
     static int swarfCount = 0;
