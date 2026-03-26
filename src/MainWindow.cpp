@@ -276,7 +276,7 @@ void MainWindow::onCreate() {
     m_hStatusBar = CreateWindowExW(0, STATUSCLASSNAMEW, nullptr,
         WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP,
         0, 0, 0, 0, m_hwnd,
-        reinterpret_cast<HMENU>(IDC_STATUS_BAR), hInst, nullptr);
+        (HMENU)(UINT_PTR)IDC_STATUS_BAR, hInst, nullptr);
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
         reinterpret_cast<LPARAM>(L"Ready"));
 
@@ -285,7 +285,7 @@ void MainWindow::onCreate() {
         0, WC_TABCONTROL, nullptr,
         WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_TABS,
         0, RIBBON_HEIGHT, MANAGERS_PANEL_WIDTH, 600,
-        m_hwnd, reinterpret_cast<HMENU>(IDC_MANAGERS_PANEL), hInst, nullptr);
+        m_hwnd, (HMENU)(UINT_PTR)IDC_MANAGERS_PANEL, hInst, nullptr);
 
     // Add tabs to the managers panel
     TCITEMW ti{};
@@ -618,7 +618,7 @@ void MainWindow::onCommand(int id) {
 void MainWindow::onPaint() {
     PAINTSTRUCT ps;
     HDC hdc = BeginPaint(m_hwnd, &ps);
-    // Background is filled by child windows; nothing extra needed here.
+    (void)hdc; // Background is filled by child windows; nothing extra needed here.
     EndPaint(m_hwnd, &ps);
 }
 
