@@ -1,6 +1,7 @@
 #include "CopilotEngine.h"
 #include "../cam/DynamicMotion.h"
 #include "../cam/Strategies2D.h"
+#include "../managers/SurfacesManager.h"
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
@@ -387,10 +388,56 @@ bool CopilotEngine::applyLastSuggestion() {
     case StrategyType::Raster3D:
     case StrategyType::Scallop3D:
     case StrategyType::Spiral3D: {
-        // For 3D strategies generate a DynamicMill placeholder on the XY boundary
-        // (full 3D requires a loaded mesh/NURBS surface which isn't stored here).
-        DynamicMotion dm;
-        tp = dm.generateForMaterial(boundary, depth, p.tool, p.material);
+        // Helper: retrieve the most-recently-added NURBS surface (or nullptr).
+        auto getActiveSurf = [this]() -> const NurbsSurface* {
+            if (!m_surfacesMgr || m_surfacesMgr->count() == 0) return nullptr;
+            return &m_surfacesMgr->at(m_surfacesMgr->count() - 1).surface;
+        };
+
+        const NurbsSurface* surf = getActiveSurf();
+        if (surf) {
+            // Derive the actual geometric Z-extent by sampling the surface on a
+            // coarse grid – the parameter domain [uMin,uMax] is NOT Z.
+            double zMin =  1e30, zMax = -1e30;
+            const int kSamples = 5;
+            for (int ui = 0; ui <= kSamples; ++ui) {
+                double u = surf->uMin() + (surf->uMax() - surf->uMin()) * ui / kSamples;
+                for (int vi = 0; vi <= kSamples; ++vi) {
+                    double v = surf->vMin() + (surf->vMax() - surf->vMin()) * vi / kSamples;
+                    double z = surf->evaluate(u, v).z;
+                    if (z < zMin) zMin = z;
+                    if (z > zMax) zMax = z;
+                }
+            }
+
+            if (p.strategy == StrategyType::WaterlineRough ||
+                p.strategy == StrategyType::Spiral3D) {
+                Strategies3D::WaterlineParams wp;
+                wp.topZ           = zMax;
+                wp.bottomZ        = zMin;
+                wp.zStep          = p.tool.diameter * 0.5;
+                wp.stepOver       = 0.4;
+                wp.stockAllowance = 0.0;
+                tp = Strategies3D::waterline(*surf, wp, p.tool, p.cuttingParams);
+            } else if (p.strategy == StrategyType::Scallop3D) {
+                Strategies3D::ScallopParams sp;
+                sp.stepOver       = p.tool.diameter * 0.3;
+                sp.stockAllowance = 0.0;
+                tp = Strategies3D::scallop(*surf, sp, p.tool, p.cuttingParams);
+            } else { // Raster3D
+                Strategies3D::WaterlineParams wp;
+                wp.topZ           = zMax;
+                wp.bottomZ        = zMin - depth;
+                wp.zStep          = p.tool.diameter * 0.5;
+                wp.stepOver       = 0.4;
+                wp.stockAllowance = 0.0;
+                tp = Strategies3D::waterline(*surf, wp, p.tool, p.cuttingParams);
+            }
+        } else {
+            // No surface available – use a dynamic milling pass as a fallback
+            DynamicMotion dm;
+            tp = dm.generateForMaterial(boundary, depth, p.tool, p.material);
+        }
         tp.setName("Copilot-3D: " + strategyToString(p.strategy));
         break;
     }
@@ -399,8 +446,20 @@ bool CopilotEngine::applyLastSuggestion() {
     case StrategyType::Swarf4Axis:
     case StrategyType::Multiaxis5:
     case StrategyType::PortMachining: {
-        DynamicMotion dm;
-        tp = dm.generateForMaterial(boundary, depth, p.tool, p.material);
+        // Reuse the same active-surface lookup pattern.
+        const NurbsSurface* surf = (m_surfacesMgr && m_surfacesMgr->count() > 0)
+                                   ? &m_surfacesMgr->at(m_surfacesMgr->count() - 1).surface
+                                   : nullptr;
+        if (surf) {
+            MultiAxisParams maParams;
+            maParams.leadAngle    = 5.0;
+            maParams.gougeProtect = true;
+            MultiAxis ma(maParams);
+            tp = ma.swarfMill(*surf, p.tool, p.cuttingParams);
+        } else {
+            DynamicMotion dm;
+            tp = dm.generateForMaterial(boundary, depth, p.tool, p.material);
+        }
         tp.setName("Copilot-MA: " + strategyToString(p.strategy));
         break;
     }

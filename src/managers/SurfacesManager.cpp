@@ -258,13 +258,12 @@ NurbsSurface SurfacesManager::makeOffset(const NurbsSurface& src, double distMM)
         }
     }
 
-    // Re-use the same degree and knot vectors from the source
+    // Build proper clamped uniform knot vectors matching the source degree and
+    // control-point count so the offset surface evaluates correctly.
     return NurbsSurface(src.uDegree(), src.vDegree(),
-                        std::vector<double>(src.uDegree() + nu + 1, 0.0), // placeholder – use proper knots below
-                        std::vector<double>(src.vDegree() + nv + 1, 0.0),
+                        uniformOpenKnots(nu, src.uDegree()),
+                        uniformOpenKnots(nv, src.vDegree()),
                         newCp);
-    // NOTE: the above knot vectors are reconstructed from scratch to match the
-    // source surface's degree and control count.
 }
 
 // --------------------------------------------------------------------------

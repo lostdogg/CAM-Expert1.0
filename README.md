@@ -1,6 +1,27 @@
 # CAM-Expert 1.0
 
-**CAM-Expert 1.0** is a comprehensive Computer-Aided Manufacturing (CAM) and Computer-Aided Design (CAD) application for Windows, written in C++17. It bridges the gap between a digital 3D model and a physical CNC machine by generating the toolpaths needed to cut parts from raw material.
+**CAM-Expert** is a comprehensive Computer-Aided Manufacturing (CAM) and Computer-Aided Design (CAD) application for Windows, written in C++17. It bridges the gap between a digital 3D model and a physical CNC machine by generating the toolpaths needed to cut parts from raw material.
+
+---
+
+## What's New in v1.2
+
+- **3D Waterline (Z-level) toolpath** – Z-level roughing/finishing on any loaded NURBS surface; accessible from Machine → 3D or keyboard shortcut **F6**
+- **3D Scallop toolpath** – constant step-over finishing with live scallop-height readout (`h = R − √(R²−(Sₒ/2)²)`); shortcut **F7**
+- **3D Raster toolpath** – parallel passes at a configurable angle projected onto the stock mesh
+- **5-Axis Swarf toolpath** – simultaneous 5-axis swarf milling with configurable lead angle and automatic IK/gouge protection
+- **Dual-light OpenGL rendering** – secondary blue-tinted fill light (`GL_LIGHT1`) for professional 3-point lighting quality
+- **CopilotEngine 3D dispatch** – Copilot "Apply" for WaterlineRough/Scallop3D/Raster3D now calls real `Strategies3D` functions when a surface is loaded, with correct geometric Z-extent sampling; multi-axis applies `MultiAxis::swarfMill`
+- **NURBS offset surface fix** – `makeOffset()` previously wrote zero-filled placeholder knot vectors; now uses proper clamped uniform knot vectors
+- **Header deduplication** – removed 200-line duplicate class/constant block that existed outside the `#endif` in `MainWindow.h`
+
+### Keyboard Shortcuts (v1.2 additions)
+
+| Key   | Action                    |
+|-------|---------------------------|
+| F5    | Regenerate all toolpaths  |
+| **F6**| 3D Waterline              |
+| **F7**| 3D Scallop                |
 
 ---
 
@@ -8,10 +29,11 @@
 
 ### Interface
 - **Ribbon-style UI** with workflow tabs: Home, Wireframe, Surfaces, Solids, Model Prep, Machine, View
-- **3-D OpenGL Viewport** – wireframe, shaded, and translucent rendering modes with orbit/pan/zoom camera
+- **3-D OpenGL Viewport** – wireframe, shaded, and translucent rendering with professional dual-light shading; orbit/pan/zoom camera
 - **Managers Panel** (left side):
   - **Toolpaths Manager** – ordered list of all machining operations with regeneration support
   - **Solids Manager** – B-Rep solid history tree with visibility control
+  - **Surfaces Manager** – NURBS surface list with visibility and trim state
   - **Levels Manager** – layer-based geometry organisation
   - **Planes Manager** – coordinate systems (WCS, Tool Plane, Construction Plane)
 - **Selection Bar & Quick Masks** – filter selections by geometry type
@@ -29,10 +51,11 @@
 ### CAM Toolpath Strategies
 | Category | Strategies |
 |---|---|
-| **2D / 2.5D Milling** | Contour (lead-in + lead-out arcs), Pocket (concentric offsets), Face Mill, Drilling (G81/G83 peck), Thread Mill |
+| **2D / 2.5D Milling** | Contour (lead-in + lead-out arcs), Pocket (concentric offsets), Face Mill, Drilling (G81/G83 peck), Thread Mill, Chamfer |
 | **Dynamic Motion** | Trochoidal milling, constant chip-load, micro-lifts, helical arc entry |
-| **3D Milling** | Waterline (Z-level), Raster, Scallop (h = R − √(R²−(Sₒ/2)²)), Spiral – all with surface projection |
-| **Multi-Axis** | 5-axis swarf, 5-axis normal-to-surface, 4-axis rotary wrap, lead/lag tilt, tool-holder collision avoidance |
+| **3D Milling** | Waterline (Z-level, **F6**), Raster (parallel passes on mesh), Scallop (h = R − √(R²−(Sₒ/2)²), **F7**), Spiral – all with geometric surface projection |
+| **Multi-Axis** | 5-axis swarf (lead/lag configurable), 5-axis normal-to-surface, 4-axis rotary wrap, tool-holder collision avoidance |
+| **Probing** | Z-surface probe, Bore/Boss centre-finder (4-touch), Corner-finder |
 | **Turning & Mill-Turn** | Rough turn, finish turn (profile following), groove (peck), thread (G76), sub-spindle transfer |
 | **Swiss-Style Machining** | Sliding headstock (Z-inverted coords), Pinch/Sync two-tool whip prevention |
 | **Cloud Tool Library** | Digital twin import, manufacturer feeds/speeds, dynamic arc limit calculation |
@@ -162,6 +185,7 @@ CAM-Expert1.0/
 │   ├── managers/
 │   │   ├── ToolpathManager.h/.cpp
 │   │   ├── SolidsManager.h/.cpp
+│   │   ├── SurfacesManager.h/.cpp    # NURBS surface list with trim/visibility state
 │   │   ├── LevelsManager.h/.cpp
 │   │   └── PlanesManager.h/.cpp
 │   ├── simulation/
@@ -189,7 +213,13 @@ CAD Input (STEP / IGES / STL / OBJ / Native)
   BRep::Solid / NurbsSurface / MeshData
         │
         ▼
-  CAM Strategies (2D/3D/MultiAxis/Turning)
+  CAM Strategies (2D / 3D / MultiAxis / Turning)
+        │
+        ├──── CopilotEngine (AI Copilot panel, F1)
+        │       ├─ IntentParser → ParameterNegotiator
+        │       ├─ LocalInferenceEngine (SLM backend)
+        │       ├─ VectorDatabase (RAG history)
+        │       └─ apply → Strategies3D / MultiAxis / DynamicMotion
         │
         ▼
   Toolpath (list of ToolpathPoints + NCI records)

@@ -147,11 +147,17 @@ void RibbonUI::buildModelPrepTab() {
 void RibbonUI::buildMachineTab() {
     RibbonTab tab;
     tab.name = "Machine";
-    RibbonGroup gen{"Generate", {
+    RibbonGroup gen2D{"2D", {
         {IDM_MACHINE_GEN_POCKET,  "2D Pocket",  "Generate a dynamic 2D pocket toolpath"},
         {IDM_MACHINE_GEN_CONTOUR, "2D Contour", "Generate a dynamic 2D contour toolpath"},
         {IDM_MACHINE_CHAMFER,     "Chamfer",    "Generate a chamfer toolpath"},
         {IDM_MACHINE_THREAD,      "Thread Mill","Generate a thread milling toolpath"}
+    }};
+    RibbonGroup gen3D{"3D", {
+        {IDM_MACHINE_3D_WATERLINE, "Waterline",  "Generate 3D Z-level waterline toolpath (F6)"},
+        {IDM_MACHINE_3D_SCALLOP,   "Scallop",    "Generate 3D constant-scallop toolpath (F7)"},
+        {IDM_MACHINE_3D_RASTER,    "Raster",     "Generate 3D parallel raster toolpath"},
+        {IDM_MACHINE_5AXIS,        "5-Axis",     "Generate 5-axis swarf toolpath"}
     }};
     RibbonGroup probe{"Probing", {
         {IDM_MACHINE_PROBE_Z,     "Probe Z",    "Probe Z surface height"},
@@ -168,7 +174,8 @@ void RibbonUI::buildMachineTab() {
         {IDM_MACHINE_REGEN,   "Regen",   "Regenerate all toolpaths (F5)"},
         {IDM_MACHINE_SUMMARY, "Summary", "Show machining time / length summary"}
     }};
-    tab.groups.push_back(gen);
+    tab.groups.push_back(gen2D);
+    tab.groups.push_back(gen3D);
     tab.groups.push_back(probe);
     tab.groups.push_back(ops);
     tab.groups.push_back(post);
