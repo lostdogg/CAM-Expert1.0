@@ -53,17 +53,20 @@ constexpr int IDM_MACHINE_3D_SCALLOP  = 2015; // Generate 3D scallop toolpath
 constexpr int IDM_MACHINE_3D_RASTER   = 2016; // Generate 3D raster toolpath
 constexpr int IDM_MACHINE_5AXIS       = 2017; // Generate 5-axis swarf toolpath
 
-constexpr int IDM_VIEW_WIREFRAME  = 3001;
-constexpr int IDM_VIEW_SHADED     = 3002;
-constexpr int IDM_VIEW_TRANSLU    = 3003;
-constexpr int IDM_VIEW_ISOMETRIC  = 3004;
-constexpr int IDM_VIEW_FRONT      = 3005;
-constexpr int IDM_VIEW_TOP        = 3006;
-constexpr int IDM_VIEW_RIGHT      = 3007;
-constexpr int IDM_VIEW_BACK       = 3008;
-constexpr int IDM_VIEW_BOTTOM     = 3009;
-constexpr int IDM_VIEW_LEFT       = 3010;
-constexpr int IDM_VIEW_FIT        = 3011;  // Fit-to-screen
+constexpr int IDM_VIEW_WIREFRAME       = 3001;
+constexpr int IDM_VIEW_SHADED          = 3002;
+constexpr int IDM_VIEW_TRANSLU         = 3003;
+constexpr int IDM_VIEW_ISOMETRIC       = 3004;
+constexpr int IDM_VIEW_FRONT           = 3005;
+constexpr int IDM_VIEW_TOP             = 3006;
+constexpr int IDM_VIEW_RIGHT           = 3007;
+constexpr int IDM_VIEW_BACK            = 3008;
+constexpr int IDM_VIEW_BOTTOM          = 3009;
+constexpr int IDM_VIEW_LEFT            = 3010;
+constexpr int IDM_VIEW_FIT             = 3011;  // F3 – Zoom to fit all entities
+constexpr int IDM_VIEW_ZOOM_SELECTED   = 3012;  // F2 – Zoom to selected entities
+constexpr int IDM_VIEW_TOGGLE_GRID     = 3013;  // F4 – Toggle grid display
+constexpr int IDM_VIEW_TOGGLE_GNOMON   = 3014;  // F5 – Toggle dynamic gnomon
 
 // Wireframe tab commands
 constexpr int IDM_WF_POINT        = 4001;
@@ -103,6 +106,26 @@ constexpr int IDM_PREP_SPLIT      = 4306;
 
 constexpr int IDM_HELP_ABOUT      = 9001;
 constexpr int IDM_COPILOT_TOGGLE  = 9002;
+constexpr int IDM_HELP_TOPICS     = 9003;  // F1 – Open help topics
+
+// Edit menu command IDs
+constexpr int IDM_EDIT_UNDO            = 5001;  // Ctrl+Z
+constexpr int IDM_EDIT_REDO            = 5002;  // Ctrl+Y
+constexpr int IDM_EDIT_COPY            = 5003;  // Ctrl+C
+constexpr int IDM_EDIT_PASTE           = 5004;  // Ctrl+V
+constexpr int IDM_EDIT_DELETE          = 5005;  // Delete – remove selected entities
+constexpr int IDM_EDIT_ANALYZE         = 5006;  // End – display Analyze dialog
+constexpr int IDM_TOGGLE_SELECT_MODE   = 5007;  // Spacebar – toggle selection mode
+
+// Geometry transform command IDs
+constexpr int IDM_GEOM_MOVE            = 6001;  // M – move selected geometry
+constexpr int IDM_GEOM_ROTATE          = 6002;  // R – rotate selected geometry
+constexpr int IDM_GEOM_SCALE           = 6003;  // S – scale selected geometry
+
+// Toolpath manager / display command IDs
+constexpr int IDM_TOOLPATH_MGR_TOGGLE  = 6101;  // T – open/focus Toolpath Manager
+constexpr int IDM_TOOLPATH_TOGGLE_DISP = 6102;  // Ctrl+Shift+T – toggle toolpath display
+constexpr int IDM_TOOLPATH_COPY_PARAMS = 6103;  // Ctrl+Shift+C – copy toolpath parameters
 
 // --------------------------------------------------------------------------
 // MainWindow – the top-level application frame.
@@ -119,7 +142,8 @@ public:
     bool create(HINSTANCE hInstance);
     void show(int nCmdShow);
 
-    HWND hwnd() const { return m_hwnd; }
+    HWND   hwnd()   const { return m_hwnd; }
+    HACCEL haccel() const { return m_hAccel; }
 
 private:
     // Win32 window procedure (static trampoline)
@@ -137,6 +161,7 @@ private:
 
     // Menu helpers
     void buildMenu();
+    void buildAcceleratorTable();     // create HACCEL for keyboard shortcuts
     void showAboutDialog();
     void fileNew();
     void fileOpen();
@@ -147,6 +172,33 @@ private:
     void runBackplot();
     void runMachineSim();
     void toggleCopilotPanel();
+
+    // --- Edit commands ---
+    void editUndo();                  // Ctrl+Z
+    void editRedo();                  // Ctrl+Y
+    void editCopy();                  // Ctrl+C
+    void editPaste();                 // Ctrl+V
+    void editDelete();                // Delete
+    void editAnalyze();               // End
+    void toggleSelectionMode();       // Spacebar
+
+    // --- View commands ---
+    void viewZoomSelected();          // F2
+    void viewToggleGrid();            // F4
+    void viewToggleGnomon();          // F5
+
+    // --- Geometry transform commands ---
+    void geomMove();                  // M
+    void geomRotate();                // R
+    void geomScale();                 // S
+
+    // --- Toolpath manager commands ---
+    void toolpathMgrToggle();         // T
+    void toolpathToggleDisplay();     // Ctrl+Shift+T
+    void toolpathCopyParams();        // Ctrl+Shift+C
+
+    // --- Help ---
+    void showHelpTopics();            // F1
 
     // --- Solid creation (Solids tab) ---
     void createSolidBox();        // IDM_SOLID_EXTRUDE: box via parameter dialog
@@ -218,8 +270,10 @@ private:
     HWND                              m_hwnd          = nullptr;
     HWND                              m_hStatusBar    = nullptr;
     HWND                              m_hManagersPanel= nullptr;
+    HACCEL                            m_hAccel        = nullptr;  // keyboard accelerator table
 
     std::wstring                      m_currentFile;  // path of the currently open project (empty = untitled)
+    bool                              m_selectionMode = true;     // true=select, false=deselect (Spacebar toggle)
 
     std::unique_ptr<RibbonUI>         m_ribbon;
     std::unique_ptr<Viewport3D>       m_viewport;

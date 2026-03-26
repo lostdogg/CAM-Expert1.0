@@ -29,6 +29,10 @@ Viewport3D::Viewport3D(HWND parent, HINSTANCE hInstance) {
 
 // --------------------------------------------------------------------------
 Viewport3D::~Viewport3D() {
+    if (m_inertiaTimer) {
+        KillTimer(m_hwnd, kInertiaTimerId);
+        m_inertiaTimer = 0;
+    }
     cleanupOpenGL();
     if (m_hwnd) DestroyWindow(m_hwnd);
 }
@@ -159,6 +163,27 @@ void Viewport3D::setView(ViewPreset preset) {
 }
 
 // --------------------------------------------------------------------------
+void Viewport3D::toggleGrid() {
+    m_showGrid = !m_showGrid;
+    redraw();
+}
+
+// --------------------------------------------------------------------------
+void Viewport3D::toggleGnomon() {
+    m_showGnomon = !m_showGnomon;
+    redraw();
+}
+
+// --------------------------------------------------------------------------
+void Viewport3D::zoomSelected() {
+    // No selection system yet; zoom to a tight fit of the visible scene
+    m_camera.distance = 180.0f;
+    m_camera.panX     = 0.0f;
+    m_camera.panY     = 0.0f;
+    redraw();
+}
+
+// --------------------------------------------------------------------------
 void Viewport3D::redraw() {
     if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
 }
@@ -216,8 +241,8 @@ void Viewport3D::render() {
         break;
     }
 
-    drawGrid();
-    drawAxes();
+    if (m_showGrid)   drawGrid();
+    if (m_showGnomon) drawAxes();
     drawStock();
     drawSolids();
     drawSurfaces();
@@ -599,11 +624,22 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         m_leftDown   = true;
         m_lastMouseX = LOWORD(lParam);
         m_lastMouseY = HIWORD(lParam);
+        // Cancel any ongoing inertia spin when user grabs the model
+        if (m_inertiaTimer) {
+            KillTimer(m_hwnd, kInertiaTimerId);
+            m_inertiaTimer = 0;
+        }
+        m_spinVelX = 0.0f;
+        m_spinVelY = 0.0f;
         SetCapture(m_hwnd);
         return 0;
     case WM_LBUTTONUP:
         m_leftDown = false;
         ReleaseCapture();
+        // Start inertia if there is meaningful velocity
+        if ((m_spinVelX * m_spinVelX + m_spinVelY * m_spinVelY) > kInertiaStop * kInertiaStop) {
+            m_inertiaTimer = SetTimer(m_hwnd, kInertiaTimerId, 16, nullptr); // ~60 fps
+        }
         return 0;
     case WM_MBUTTONDOWN:
         m_midDown    = true;
@@ -629,9 +665,14 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         int x = LOWORD(lParam), y = HIWORD(lParam);
         int dx = x - m_lastMouseX, dy = y - m_lastMouseY;
         if (m_leftDown) {
-            // Left drag: orbit
-            m_camera.orbitX += dy * 0.5f;
-            m_camera.orbitY += dx * 0.5f;
+            // Left drag: orbit (dynamic rotation)
+            float vx = dy * 0.5f;
+            float vy = dx * 0.5f;
+            m_camera.orbitX += vx;
+            m_camera.orbitY += vy;
+            // Track velocity for inertia
+            m_spinVelX = vx;
+            m_spinVelY = vy;
             redraw();
         }
         if (m_midDown || m_rightDown) {
@@ -644,15 +685,66 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         return 0;
     }
     case WM_MOUSEWHEEL: {
-        int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-        // Zoom by a fixed fraction of current distance per WHEEL_DELTA tick,
-        // giving consistent angular rate regardless of distance.
-        static constexpr float kZoomFraction = 0.12f; // 12% per wheel notch
-        float ticks    = static_cast<float>(delta) / WHEEL_DELTA;
-        float zoomStep = m_camera.distance * kZoomFraction * ticks;
-        m_camera.distance -= zoomStep;
-        if (m_camera.distance < 1.0f) m_camera.distance = 1.0f;
+        // Determine which modifier keys are held
+        bool ctrl  = (GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL) != 0;
+        bool shift = (GET_KEYSTATE_WPARAM(wParam) & MK_SHIFT)   != 0;
+        int  delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        float ticks = static_cast<float>(delta) / WHEEL_DELTA;
+
+        if (ctrl && shift) {
+            // Ctrl+Shift+Wheel → horizontal pan
+            m_camera.panX += ticks * 10.0f;
+        } else if (ctrl) {
+            // Ctrl+Wheel → rotate around Y axis (yaw / spin)
+            float rot = ticks * 8.0f;
+            m_camera.orbitY += rot;
+            // Kick off a small inertia spin
+            m_spinVelX = 0.0f;
+            m_spinVelY = rot;
+            if (m_inertiaTimer) KillTimer(m_hwnd, kInertiaTimerId);
+            m_inertiaTimer = SetTimer(m_hwnd, kInertiaTimerId, 16, nullptr);
+        } else if (shift) {
+            // Shift+Wheel → rotate around X axis (pitch / tilt)
+            float rot = ticks * 8.0f;
+            m_camera.orbitX += rot;
+            m_spinVelX = rot;
+            m_spinVelY = 0.0f;
+            if (m_inertiaTimer) KillTimer(m_hwnd, kInertiaTimerId);
+            m_inertiaTimer = SetTimer(m_hwnd, kInertiaTimerId, 16, nullptr);
+        } else {
+            // Plain wheel → zoom (12% of current distance per notch)
+            static constexpr float kZoomFraction = 0.12f;
+            float zoomStep = m_camera.distance * kZoomFraction * ticks;
+            m_camera.distance -= zoomStep;
+            if (m_camera.distance < 1.0f) m_camera.distance = 1.0f;
+        }
         redraw();
+        return 0;
+    }
+    case WM_MOUSEHWHEEL: {
+        // Native horizontal scroll (trackpad two-finger swipe / tilt-wheel) → pan X
+        int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        float ticks = static_cast<float>(delta) / WHEEL_DELTA;
+        m_camera.panX += ticks * 10.0f;
+        redraw();
+        return 0;
+    }
+    case WM_TIMER: {
+        if (wParam == kInertiaTimerId) {
+            // Dampen and apply spin inertia
+            m_spinVelX *= kInertiaDamping;
+            m_spinVelY *= kInertiaDamping;
+            m_camera.orbitX += m_spinVelX;
+            m_camera.orbitY += m_spinVelY;
+            redraw();
+            float speed = m_spinVelX * m_spinVelX + m_spinVelY * m_spinVelY;
+            if (speed < kInertiaStop * kInertiaStop) {
+                KillTimer(m_hwnd, kInertiaTimerId);
+                m_inertiaTimer = 0;
+                m_spinVelX = 0.0f;
+                m_spinVelY = 0.0f;
+            }
+        }
         return 0;
     }
     case WM_ERASEBKGND:

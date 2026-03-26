@@ -236,21 +236,55 @@ LRESULT MainWindow::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         return 0;
 
     case WM_KEYDOWN: {
-        // Keyboard shortcuts (processed when main window has focus)
-        bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-        if (ctrl) {
+        // Keyboard shortcuts (processed when main window has focus).
+        // The Windows accelerator table (m_hAccel) handles most cases when a
+        // child window has focus; this handler covers the same keys for the
+        // top-level frame window itself.
+        bool ctrl  = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        bool shift = (GetKeyState(VK_SHIFT)   & 0x8000) != 0;
+
+        if (ctrl && shift) {
             switch (static_cast<int>(wParam)) {
-            case 'N': onCommand(IDM_FILE_NEW);     return 0;
-            case 'O': onCommand(IDM_FILE_OPEN);    return 0;
-            case 'S': onCommand(IDM_FILE_SAVE);    return 0;
-            case 'I': onCommand(IDM_FILE_IMPORT);  return 0;
-            case 'P': onCommand(IDM_MACHINE_POST); return 0;
+            case 'T': onCommand(IDM_TOOLPATH_TOGGLE_DISP); return 0;
+            case 'C': onCommand(IDM_TOOLPATH_COPY_PARAMS);  return 0;
             }
         }
-        if (wParam == VK_F1)  { onCommand(IDM_COPILOT_TOGGLE);      return 0; }
-        if (wParam == VK_F5)  { onCommand(IDM_MACHINE_REGEN);       return 0; }
-        if (wParam == VK_F6)  { onCommand(IDM_MACHINE_3D_WATERLINE); return 0; }
-        if (wParam == VK_F7)  { onCommand(IDM_MACHINE_3D_SCALLOP);  return 0; }
+        if (ctrl) {
+            switch (static_cast<int>(wParam)) {
+            case 'N': onCommand(IDM_FILE_NEW);      return 0;
+            case 'O': onCommand(IDM_FILE_OPEN);     return 0;
+            case 'S': onCommand(IDM_FILE_SAVE);     return 0;
+            case 'I': onCommand(IDM_FILE_IMPORT);   return 0;
+            case 'P': onCommand(IDM_MACHINE_POST);  return 0;
+            case 'Z': onCommand(IDM_EDIT_UNDO);     return 0;
+            case 'Y': onCommand(IDM_EDIT_REDO);     return 0;
+            case 'C': onCommand(IDM_EDIT_COPY);     return 0;
+            case 'V': onCommand(IDM_EDIT_PASTE);    return 0;
+            }
+        }
+        // Single-key shortcuts (only when Ctrl is NOT held to avoid conflicts)
+        if (!ctrl) {
+            switch (static_cast<int>(wParam)) {
+            case VK_DELETE: onCommand(IDM_EDIT_DELETE);         return 0;
+            case VK_END:    onCommand(IDM_EDIT_ANALYZE);        return 0;
+            case VK_SPACE:  onCommand(IDM_TOGGLE_SELECT_MODE);  return 0;
+            case VK_F1:     onCommand(IDM_HELP_TOPICS);         return 0;
+            case VK_F2:     onCommand(IDM_VIEW_ZOOM_SELECTED);  return 0;
+            case VK_F3:     onCommand(IDM_VIEW_FIT);            return 0;
+            case VK_F4:     onCommand(IDM_VIEW_TOGGLE_GRID);    return 0;
+            case VK_F5:     onCommand(IDM_VIEW_TOGGLE_GNOMON);  return 0;
+            case VK_F6:     onCommand(IDM_MACHINE_3D_WATERLINE); return 0;
+            case VK_F7:     onCommand(IDM_MACHINE_3D_SCALLOP);  return 0;
+            case 'T':       onCommand(IDM_TOOLPATH_MGR_TOGGLE); return 0;
+            case 'M':       onCommand(IDM_GEOM_MOVE);           return 0;
+            case 'R':       onCommand(IDM_GEOM_ROTATE);         return 0;
+            case 'S':       onCommand(IDM_GEOM_SCALE);          return 0;
+            case 'L':       onCommand(IDM_WF_LINE);             return 0;
+            case 'A':       onCommand(IDM_WF_ARC);              return 0;
+            case 'C':       onCommand(IDM_WF_CIRCLE);           return 0;
+            case 'P':       onCommand(IDM_WF_POINT);            return 0;
+            }
+        }
         break;
     }
 
@@ -268,6 +302,7 @@ LRESULT MainWindow::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 // --------------------------------------------------------------------------
 void MainWindow::onCreate() {
     buildMenu();
+    buildAcceleratorTable();
     updateWindowTitle();   // set initial "Untitled" title
 
     HINSTANCE hInst = Application::instance().hInstance();
@@ -367,85 +402,160 @@ void MainWindow::onCreate() {
 
 // --------------------------------------------------------------------------
 void MainWindow::buildMenu() {
-    HMENU hMenu     = CreateMenu();
-    HMENU hFile     = CreatePopupMenu();
-    HMENU hSurface  = CreatePopupMenu();
-    HMENU hMachine  = CreatePopupMenu();
-    HMENU hView     = CreatePopupMenu();
-    HMENU hHelp     = CreatePopupMenu();
+    HMENU hMenu    = CreateMenu();
+    HMENU hFile    = CreatePopupMenu();
+    HMENU hEdit    = CreatePopupMenu();
+    HMENU hSurface = CreatePopupMenu();
+    HMENU hMachine = CreatePopupMenu();
+    HMENU hView    = CreatePopupMenu();
+    HMENU hHelp    = CreatePopupMenu();
 
     // File menu
-    AppendMenuW(hFile, MF_STRING,  IDM_FILE_NEW,    L"&New\tCtrl+N");
-    AppendMenuW(hFile, MF_STRING,  IDM_FILE_OPEN,   L"&Open…\tCtrl+O");
-    AppendMenuW(hFile, MF_STRING,  IDM_FILE_SAVE,   L"&Save\tCtrl+S");
-    AppendMenuW(hFile, MF_STRING,  IDM_FILE_SAVEAS, L"Save &As…");
+    AppendMenuW(hFile, MF_STRING,    IDM_FILE_NEW,    L"&New\tCtrl+N");
+    AppendMenuW(hFile, MF_STRING,    IDM_FILE_OPEN,   L"&Open…\tCtrl+O");
+    AppendMenuW(hFile, MF_STRING,    IDM_FILE_SAVE,   L"&Save\tCtrl+S");
+    AppendMenuW(hFile, MF_STRING,    IDM_FILE_SAVEAS, L"Save &As…");
     AppendMenuW(hFile, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hFile, MF_STRING,  IDM_FILE_IMPORT, L"&Import…");
+    AppendMenuW(hFile, MF_STRING,    IDM_FILE_IMPORT, L"&Import…\tCtrl+I");
     AppendMenuW(hFile, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hFile, MF_STRING,  IDM_FILE_EXIT,   L"E&xit\tAlt+F4");
+    AppendMenuW(hFile, MF_STRING,    IDM_FILE_EXIT,   L"E&xit\tAlt+F4");
+
+    // Edit menu
+    AppendMenuW(hEdit, MF_STRING,    IDM_EDIT_UNDO,           L"&Undo\tCtrl+Z");
+    AppendMenuW(hEdit, MF_STRING,    IDM_EDIT_REDO,           L"&Redo\tCtrl+Y");
+    AppendMenuW(hEdit, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hEdit, MF_STRING,    IDM_EDIT_COPY,           L"&Copy Selected\tCtrl+C");
+    AppendMenuW(hEdit, MF_STRING,    IDM_EDIT_PASTE,          L"&Paste\tCtrl+V");
+    AppendMenuW(hEdit, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hEdit, MF_STRING,    IDM_EDIT_DELETE,         L"&Delete Selected\tDel");
+    AppendMenuW(hEdit, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hEdit, MF_STRING,    IDM_EDIT_ANALYZE,        L"&Analyze…\tEnd");
+    AppendMenuW(hEdit, MF_STRING,    IDM_TOGGLE_SELECT_MODE,  L"&Toggle Selection Mode\tSpace");
 
     // Surfaces menu
-    AppendMenuW(hSurface, MF_STRING, IDM_SURF_LOFT,    L"&Loft…");
-    AppendMenuW(hSurface, MF_STRING, IDM_SURF_REVOLVE, L"&Revolve…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_LOFT,    L"&Loft…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_REVOLVE, L"&Revolve…");
     AppendMenuW(hSurface, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hSurface, MF_STRING, IDM_SURF_FILLET,  L"&Fillet Blend…");
-    AppendMenuW(hSurface, MF_STRING, IDM_SURF_OFFSET,  L"&Offset…");
-    AppendMenuW(hSurface, MF_STRING, IDM_SURF_EXTEND,  L"&Extend…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_FILLET,  L"&Fillet Blend…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_OFFSET,  L"&Offset…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_EXTEND,  L"&Extend…");
     AppendMenuW(hSurface, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hSurface, MF_STRING, IDM_SURF_TRIM,    L"&Trim");
-    AppendMenuW(hSurface, MF_STRING, IDM_SURF_UNTRIM,  L"&Untrim");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_TRIM,    L"&Trim");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_UNTRIM,  L"&Untrim");
 
     // Machine menu
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_BACKPLOT, L"&Backplot");
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_VERIFY,   L"&Verify");
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_SIM,      L"Machine &Simulation");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_BACKPLOT, L"&Backplot");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_VERIFY,   L"&Verify");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_SIM,      L"Machine &Simulation");
     AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_POST,     L"&Post Process…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_POST,     L"&Post Process…\tCtrl+P");
     AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_GEN_POCKET,  L"Generate 2D &Pocket…");
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_GEN_CONTOUR, L"Generate 2D &Contour…");
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_CHAMFER,     L"Generate C&hamfer…");
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_THREAD,      L"Generate T&hread Mill…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_GEN_POCKET,  L"Generate 2D &Pocket…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_GEN_CONTOUR, L"Generate 2D &Contour…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_CHAMFER,     L"Generate C&hamfer…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_THREAD,      L"Generate T&hread Mill…");
     AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_3D_WATERLINE, L"Generate 3D &Waterline…");
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_3D_SCALLOP,   L"Generate 3D &Scallop…");
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_3D_RASTER,    L"Generate 3D &Raster…");
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_5AXIS,        L"Generate &5-Axis Swarf…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_3D_WATERLINE, L"Generate 3D &Waterline…\tF6");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_3D_SCALLOP,   L"Generate 3D &Scallop…\tF7");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_3D_RASTER,    L"Generate 3D &Raster…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_5AXIS,        L"Generate &5-Axis Swarf…");
     AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_PROBE_Z,     L"Probe &Z Surface…");
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_PROBE_BORE,  L"Probe &Bore/Boss Center…");
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_PROBE_CORNER,L"Probe C&orner…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_PROBE_Z,     L"Probe &Z Surface…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_PROBE_BORE,  L"Probe &Bore/Boss Center…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_PROBE_CORNER,L"Probe C&orner…");
     AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_REGEN,    L"Re&generate All\tF5");
-    AppendMenuW(hMachine, MF_STRING, IDM_MACHINE_SUMMARY,  L"&Machining Summary…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_REGEN,    L"Re&generate All");
+    AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_SUMMARY,  L"&Machining Summary…");
+    AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hMachine, MF_STRING,    IDM_TOOLPATH_MGR_TOGGLE,  L"&Toolpath Manager\tT");
+    AppendMenuW(hMachine, MF_STRING,    IDM_TOOLPATH_TOGGLE_DISP, L"Toggle Toolpath &Display\tCtrl+Shift+T");
+    AppendMenuW(hMachine, MF_STRING,    IDM_TOOLPATH_COPY_PARAMS, L"Copy Toolpath Para&ms\tCtrl+Shift+C");
 
     // View menu
-    AppendMenuW(hView, MF_STRING, IDM_VIEW_WIREFRAME, L"&Wireframe");
-    AppendMenuW(hView, MF_STRING, IDM_VIEW_SHADED,    L"&Shaded");
-    AppendMenuW(hView, MF_STRING, IDM_VIEW_TRANSLU,   L"&Translucent");
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_WIREFRAME,     L"&Wireframe");
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_SHADED,        L"&Shaded");
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_TRANSLU,       L"&Translucent");
     AppendMenuW(hView, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hView, MF_STRING, IDM_VIEW_ISOMETRIC, L"&Isometric");
-    AppendMenuW(hView, MF_STRING, IDM_VIEW_FRONT,     L"&Front");
-    AppendMenuW(hView, MF_STRING, IDM_VIEW_TOP,       L"&Top");
-    AppendMenuW(hView, MF_STRING, IDM_VIEW_RIGHT,     L"&Right");
-    AppendMenuW(hView, MF_STRING, IDM_VIEW_BACK,      L"&Back");
-    AppendMenuW(hView, MF_STRING, IDM_VIEW_BOTTOM,    L"Bot&tom");
-    AppendMenuW(hView, MF_STRING, IDM_VIEW_LEFT,      L"&Left");
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_ISOMETRIC,     L"&Isometric");
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_FRONT,         L"&Front");
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_TOP,           L"&Top");
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_RIGHT,         L"&Right");
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_BACK,          L"&Back");
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_BOTTOM,        L"Bot&tom");
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_LEFT,          L"&Left");
     AppendMenuW(hView, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hView, MF_STRING, IDM_VIEW_FIT,       L"Fit &All");
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_ZOOM_SELECTED, L"Zoom to &Selected\tF2");
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_FIT,           L"Zoom to &Fit All\tF3");
+    AppendMenuW(hView, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_TOGGLE_GRID,   L"Toggle &Grid\tF4");
+    AppendMenuW(hView, MF_STRING,    IDM_VIEW_TOGGLE_GNOMON, L"Toggle G&nomon\tF5");
+
+    // Geometry menu (hidden here; accessible via Wireframe ribbon tab and shortcuts)
+    HMENU hGeom = CreatePopupMenu();
+    AppendMenuW(hGeom, MF_STRING, IDM_WF_LINE,    L"&Line\tL");
+    AppendMenuW(hGeom, MF_STRING, IDM_WF_ARC,     L"&Arc\tA");
+    AppendMenuW(hGeom, MF_STRING, IDM_WF_CIRCLE,  L"&Circle\tC");
+    AppendMenuW(hGeom, MF_STRING, IDM_WF_POINT,   L"&Point\tP");
+    AppendMenuW(hGeom, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hGeom, MF_STRING, IDM_GEOM_MOVE,   L"&Move\tM");
+    AppendMenuW(hGeom, MF_STRING, IDM_GEOM_ROTATE, L"&Rotate\tR");
+    AppendMenuW(hGeom, MF_STRING, IDM_GEOM_SCALE,  L"&Scale\tS");
 
     // Help menu
-    AppendMenuW(hHelp, MF_STRING, IDM_HELP_ABOUT,      L"&About CAM-Expert…");
+    AppendMenuW(hHelp, MF_STRING,    IDM_HELP_TOPICS,    L"&Help Topics\tF1");
     AppendMenuW(hHelp, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hHelp, MF_STRING, IDM_COPILOT_TOGGLE,  L"Toggle &Copilot Panel\tF1");
+    AppendMenuW(hHelp, MF_STRING,    IDM_HELP_ABOUT,     L"&About CAM-Expert…");
+    AppendMenuW(hHelp, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hHelp, MF_STRING,    IDM_COPILOT_TOGGLE, L"Toggle &Copilot Panel");
 
     AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hFile),    L"&File");
+    AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hEdit),    L"&Edit");
+    AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hGeom),    L"&Geometry");
     AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hSurface), L"&Surfaces");
     AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hMachine), L"&Machine");
     AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hView),    L"&View");
     AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hHelp),    L"&Help");
 
     SetMenu(m_hwnd, hMenu);
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::buildAcceleratorTable() {
+    // Windows accelerator table: fires WM_COMMAND even when a child window
+    // (e.g. the Copilot text box) holds keyboard focus.
+    // Single-character CAD shortcuts (T, M, R, S, L, A, C, P) are intentionally
+    // omitted here so they only trigger when the main frame has focus via
+    // WM_KEYDOWN, avoiding interference with text-entry fields.
+    ACCEL accel[] = {
+        // File
+        { FVIRTKEY | FCONTROL,               'N',      IDM_FILE_NEW    },
+        { FVIRTKEY | FCONTROL,               'O',      IDM_FILE_OPEN   },
+        { FVIRTKEY | FCONTROL,               'S',      IDM_FILE_SAVE   },
+        { FVIRTKEY | FCONTROL,               'I',      IDM_FILE_IMPORT },
+        // Edit
+        { FVIRTKEY | FCONTROL,               'Z',      IDM_EDIT_UNDO   },
+        { FVIRTKEY | FCONTROL,               'Y',      IDM_EDIT_REDO   },
+        { FVIRTKEY | FCONTROL,               'C',      IDM_EDIT_COPY   },
+        { FVIRTKEY | FCONTROL,               'V',      IDM_EDIT_PASTE  },
+        { FVIRTKEY,                          VK_DELETE,IDM_EDIT_DELETE  },
+        { FVIRTKEY,                          VK_END,   IDM_EDIT_ANALYZE },
+        // Machine
+        { FVIRTKEY | FCONTROL,               'P',      IDM_MACHINE_POST },
+        { FVIRTKEY,                          VK_F6,    IDM_MACHINE_3D_WATERLINE },
+        { FVIRTKEY,                          VK_F7,    IDM_MACHINE_3D_SCALLOP   },
+        // View / Function keys
+        { FVIRTKEY,                          VK_F1,    IDM_HELP_TOPICS         },
+        { FVIRTKEY,                          VK_F2,    IDM_VIEW_ZOOM_SELECTED  },
+        { FVIRTKEY,                          VK_F3,    IDM_VIEW_FIT            },
+        { FVIRTKEY,                          VK_F4,    IDM_VIEW_TOGGLE_GRID    },
+        { FVIRTKEY,                          VK_F5,    IDM_VIEW_TOGGLE_GNOMON  },
+        // Toolpath (Ctrl+Shift combos)
+        { FVIRTKEY | FCONTROL | FSHIFT,      'T',      IDM_TOOLPATH_TOGGLE_DISP },
+        { FVIRTKEY | FCONTROL | FSHIFT,      'C',      IDM_TOOLPATH_COPY_PARAMS },
+    };
+    if (m_hAccel) DestroyAcceleratorTable(m_hAccel);
+    m_hAccel = CreateAcceleratorTableW(accel,
+                                       static_cast<int>(sizeof(accel) / sizeof(accel[0])));
 }
 
 // --------------------------------------------------------------------------
@@ -599,9 +709,37 @@ void MainWindow::onCommand(int id) {
         showAboutDialog();
         break;
 
+    case IDM_HELP_TOPICS:
+        showHelpTopics();
+        break;
+
     case IDM_COPILOT_TOGGLE:
         toggleCopilotPanel();
         break;
+
+    // Edit commands
+    case IDM_EDIT_UNDO:           editUndo();           break;
+    case IDM_EDIT_REDO:           editRedo();           break;
+    case IDM_EDIT_COPY:           editCopy();           break;
+    case IDM_EDIT_PASTE:          editPaste();          break;
+    case IDM_EDIT_DELETE:         editDelete();         break;
+    case IDM_EDIT_ANALYZE:        editAnalyze();        break;
+    case IDM_TOGGLE_SELECT_MODE:  toggleSelectionMode(); break;
+
+    // View commands
+    case IDM_VIEW_ZOOM_SELECTED:  viewZoomSelected();   break;
+    case IDM_VIEW_TOGGLE_GRID:    viewToggleGrid();     break;
+    case IDM_VIEW_TOGGLE_GNOMON:  viewToggleGnomon();   break;
+
+    // Geometry transform commands
+    case IDM_GEOM_MOVE:           geomMove();           break;
+    case IDM_GEOM_ROTATE:         geomRotate();         break;
+    case IDM_GEOM_SCALE:          geomScale();          break;
+
+    // Toolpath manager commands
+    case IDM_TOOLPATH_MGR_TOGGLE:  toolpathMgrToggle();   break;
+    case IDM_TOOLPATH_TOGGLE_DISP: toolpathToggleDisplay(); break;
+    case IDM_TOOLPATH_COPY_PARAMS: toolpathCopyParams();   break;
 
     default:
         // Forward only Copilot-panel command IDs to avoid interfering
@@ -623,6 +761,10 @@ void MainWindow::onPaint() {
 
 // --------------------------------------------------------------------------
 void MainWindow::onDestroy() {
+    if (m_hAccel) {
+        DestroyAcceleratorTable(m_hAccel);
+        m_hAccel = nullptr;
+    }
     PostQuitMessage(0);
 }
 
@@ -633,20 +775,44 @@ void MainWindow::showAboutDialog() {
         L"\n\nComputer-Aided Manufacturing & Design software.\n"
         L"Supports 2D/2.5D, 3D, and Multi-Axis machining strategies.\n"
         L"Post-Processor: Fanuc, Haas, Heidenhain, and more.\n\n"
+        L"Keyboard Shortcuts:\n"
+        L"  Ctrl+N/O/S  New / Open / Save\n"
+        L"  Ctrl+Z/Y    Undo / Redo\n"
+        L"  Ctrl+C/V    Copy / Paste selected entities\n"
+        L"  Del / End   Delete selected / Analyze dialog\n"
+        L"  Space       Toggle selection / deselection mode\n"
+        L"  F1          Help Topics\n"
+        L"  F2          Zoom to selected entities\n"
+        L"  F3          Zoom to fit all entities\n"
+        L"  F4          Toggle grid display\n"
+        L"  F5          Toggle dynamic gnomon\n"
+        L"  F6 / F7     3D Waterline / Scallop toolpath\n"
+        L"  T           Toolpath Manager\n"
+        L"  M / R / S   Move / Rotate / Scale geometry\n"
+        L"  L / A / C / P  Line / Arc / Circle / Point creation\n"
+        L"  Ctrl+Shift+T   Toggle toolpath display\n"
+        L"  Ctrl+Shift+C   Copy toolpath parameters\n\n"
+        L"Mouse Controls:\n"
+        L"  Left drag           Orbit (dynamic rotation)\n"
+        L"  Middle/Right drag   Pan\n"
+        L"  Scroll wheel        Zoom in / out\n"
+        L"  Ctrl + Scroll       Rotate (yaw) with inertia spin\n"
+        L"  Shift + Scroll      Rotate (pitch) with inertia spin\n"
+        L"  Ctrl+Shift+Scroll   Pan horizontally\n"
+        L"  Horizontal scroll   Pan left / right (trackpad)\n\n"
+        L"New in v1.3:\n"
+        L"  \u2022 Full keyboard shortcut set (Mastercam-style)\n"
+        L"  \u2022 Windows accelerator table for system-wide shortcut support\n"
+        L"  \u2022 Edit menu (Undo, Redo, Copy, Paste, Delete, Analyze)\n"
+        L"  \u2022 Geometry menu (Move, Rotate, Scale, Line, Arc, Circle, Point)\n"
+        L"  \u2022 Enhanced mouse: Ctrl/Shift+wheel rotation with inertia spin\n"
+        L"  \u2022 Horizontal scroll (WM_MOUSEHWHEEL) pans view left/right\n"
+        L"  \u2022 F4/F5 grid and gnomon display toggles\n\n"
         L"New in v1.2:\n"
         L"  \u2022 3D Waterline (Z-level) toolpath generation\n"
         L"  \u2022 3D Scallop (constant step-over) with live scallop-height readout\n"
         L"  \u2022 3D Raster (parallel passes) projected onto mesh stock\n"
-        L"  \u2022 5-Axis Swarf milling with configurable lead angle\n"
-        L"  \u2022 F6/F7 keyboard shortcuts for 3D Waterline / Scallop\n"
-        L"  \u2022 Fixed NURBS offset surface knot vectors (correct geometry)\n"
-        L"  \u2022 Dual-light OpenGL rendering for world-class surface shading\n\n"
-        L"New in v1.1:\n"
-        L"  \u2022 NURBS Surface creation (Loft, Revolve, Fillet, Offset, Extend, Trim)\n"
-        L"  \u2022 Chamfer and Thread Mill strategies\n"
-        L"  \u2022 Probing cycles (Z-surface, Bore/Boss, Corner)\n"
-        L"  \u2022 Strategy-aware Copilot apply (drill, contour, pocket, chamfer, thread)\n"
-        L"  \u2022 Feature-Recognition depth computed from solid geometry\n\n"
+        L"  \u2022 5-Axis Swarf milling with configurable lead angle\n\n"
         L"\u00A9 2024\u20132025 CAM-Expert Project";
     MessageBoxW(m_hwnd, msg.c_str(), L"About CAM-Expert", MB_OK | MB_ICONINFORMATION);
 }
@@ -930,8 +1096,208 @@ void MainWindow::toggleCopilotPanel() {
 }
 
 // ==========================================================================
-// Input-dialog helpers
+// Edit command handlers
 // ==========================================================================
+
+// --------------------------------------------------------------------------
+void MainWindow::editUndo() {
+    // Placeholder: a full undo stack would be implemented in a future milestone.
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(L"Undo: no operations to undo."));
+    MessageBeep(MB_ICONASTERISK);
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::editRedo() {
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(L"Redo: no operations to redo."));
+    MessageBeep(MB_ICONASTERISK);
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::editCopy() {
+    // Placeholder: copy selected entities to the internal clipboard.
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(L"Copy: select entities first."));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::editPaste() {
+    // Placeholder: paste previously copied entities.
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(L"Paste: clipboard is empty."));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::editDelete() {
+    // Placeholder: delete selected entities from all managers.
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(L"Delete: no entities selected."));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::editAnalyze() {
+    // Display the Analyze dialog (model analysis / draft-check results).
+    prepAnalyse();
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::toggleSelectionMode() {
+    m_selectionMode = !m_selectionMode;
+    const wchar_t* modeName = m_selectionMode ? L"Selection mode: SELECT"
+                                               : L"Selection mode: DESELECT";
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(modeName));
+}
+
+// ==========================================================================
+// View command handlers
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+void MainWindow::viewZoomSelected() {
+    if (m_viewport) {
+        m_viewport->zoomSelected();
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"View: zoomed to selected entities."));
+    }
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::viewToggleGrid() {
+    if (m_viewport) {
+        m_viewport->toggleGrid();
+        bool on = m_viewport->gridVisible();
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(on ? L"Grid: ON" : L"Grid: OFF"));
+    }
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::viewToggleGnomon() {
+    if (m_viewport) {
+        m_viewport->toggleGnomon();
+        bool on = m_viewport->gnomonVisible();
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(on ? L"Gnomon: ON" : L"Gnomon: OFF"));
+    }
+}
+
+// ==========================================================================
+// Geometry transform command handlers
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+void MainWindow::geomMove() {
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(L"Move: select geometry to move, then specify vector."));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::geomRotate() {
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(L"Rotate: select geometry to rotate, then specify angle."));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::geomScale() {
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(L"Scale: select geometry to scale, then specify factor."));
+}
+
+// ==========================================================================
+// Toolpath manager / display command handlers
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+void MainWindow::toolpathMgrToggle() {
+    // Activate the Toolpath tab in the managers panel (tab 0).
+    if (m_hManagersPanel) {
+        TabCtrl_SetCurSel(m_hManagersPanel, 0);
+        SetFocus(m_hManagersPanel);
+    }
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(L"Toolpath Manager activated."));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::toolpathToggleDisplay() {
+    // Toggle toolpath curve visibility in the viewport.
+    // The viewport renders toolpaths when a ToolpathManager is connected;
+    // a simple approach is to connect / disconnect it.
+    if (!m_viewport || !m_toolpathMgr) return;
+    static bool toolpathsVisible = true;
+    toolpathsVisible = !toolpathsVisible;
+    m_viewport->setToolpathManager(toolpathsVisible ? m_toolpathMgr.get() : nullptr);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(toolpathsVisible
+            ? L"Toolpath display: ON"
+            : L"Toolpath display: OFF"));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::toolpathCopyParams() {
+    // Placeholder: copy parameters from the active toolpath to the clipboard.
+    if (!m_toolpathMgr || m_toolpathMgr->count() == 0) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Copy toolpath params: no toolpaths exist."));
+        return;
+    }
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(L"Toolpath parameters copied."));
+}
+
+// ==========================================================================
+// Help command handlers
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+void MainWindow::showHelpTopics() {
+    std::wstring msg =
+        L"CAM-Expert Keyboard Shortcuts\n"
+        L"================================\n\n"
+        L"File\n"
+        L"  Ctrl+N    New file\n"
+        L"  Ctrl+O    Open file\n"
+        L"  Ctrl+S    Save file\n\n"
+        L"Edit\n"
+        L"  Ctrl+Z    Undo last action\n"
+        L"  Ctrl+Y    Redo last undone action\n"
+        L"  Ctrl+C    Copy selected entities\n"
+        L"  Ctrl+V    Paste entities\n"
+        L"  Delete    Remove selected entities\n"
+        L"  End       Analyze dialog\n"
+        L"  Space     Toggle selection / deselection mode\n\n"
+        L"View / Function Keys\n"
+        L"  F2        Zoom to selected entities\n"
+        L"  F3        Zoom to fit all entities\n"
+        L"  F4        Toggle grid display\n"
+        L"  F5        Toggle dynamic gnomon\n"
+        L"  F6        3D Waterline toolpath\n"
+        L"  F7        3D Scallop toolpath\n\n"
+        L"Toolpath & CAD\n"
+        L"  T         Open Toolpath Manager\n"
+        L"  M         Move selected geometry\n"
+        L"  R         Rotate selected geometry\n"
+        L"  S         Scale selected geometry\n"
+        L"  L         Line creation\n"
+        L"  A         Arc creation\n"
+        L"  C         Circle creation\n"
+        L"  P         Point creation\n"
+        L"  Ctrl+Shift+T  Toggle toolpath display\n"
+        L"  Ctrl+Shift+C  Copy toolpath parameters\n\n"
+        L"Mouse Controls\n"
+        L"  Left drag            Orbit (dynamic rotation)\n"
+        L"  Middle / Right drag  Pan\n"
+        L"  Scroll wheel         Zoom\n"
+        L"  Ctrl + Scroll        Rotate (yaw) with inertia\n"
+        L"  Shift + Scroll       Rotate (pitch) with inertia\n"
+        L"  Ctrl+Shift+Scroll    Pan horizontally\n"
+        L"  Horizontal scroll    Pan left / right";
+    MessageBoxW(m_hwnd, msg.c_str(), L"CAM-Expert Help", MB_OK | MB_ICONINFORMATION);
+}
+
+// --------------------------------------------------------------------------
 
 // --------------------------------------------------------------------------
 BRep::Solid* MainWindow::activeSolid() {

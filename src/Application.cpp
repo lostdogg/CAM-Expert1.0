@@ -16,8 +16,15 @@ int Application::run(HINSTANCE hInstance, int nCmdShow) {
 
     m_mainWindow->show(nCmdShow);
 
+    HWND   hWnd   = m_mainWindow->hwnd();
+    HACCEL hAccel = m_mainWindow->haccel();
+
     MSG msg = {};
     while (GetMessage(&msg, nullptr, 0, 0)) {
+        // TranslateAccelerator fires WM_COMMAND for shortcut keys even when
+        // a child window (e.g. Copilot text box) holds focus.
+        if (hAccel && TranslateAccelerator(hWnd, hAccel, &msg))
+            continue;
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
