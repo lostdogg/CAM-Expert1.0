@@ -316,6 +316,9 @@ void MainWindow::onCreate() {
     // Connect the solids manager to the viewport so BRep solids are rendered
     m_viewport->setSolidsManager(m_solidsMgr.get());
 
+    // Connect the surfaces manager to the viewport so NURBS surfaces are rendered
+    m_viewport->setSurfacesManager(m_surfacesMgr.get());
+
     // Connect the toolpath manager change callback to trigger a viewport redraw
     m_toolpathMgr->setOnChange([this]() {
         if (m_viewport) m_viewport->redraw();
