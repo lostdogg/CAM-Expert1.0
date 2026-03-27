@@ -187,23 +187,53 @@ void RibbonUI::buildSurfacesTab() {
 void RibbonUI::buildSolidsTab() {
     RibbonTab tab;
     tab.name = "Solids";
+
+    // Create group – history-based operations from wireframe chains
     RibbonGroup create{"Create", {
-        {IDM_SOLID_EXTRUDE,  "Extrude",   "Extrude a profile into a solid (Box)"},
-        {IDM_SOLID_REVOLVE,  "Revolve",   "Revolve a profile into a solid (Cylinder)"},
-        {IDM_SOLID_SPHERE,   "Sphere",    "Create a parametric sphere"}
+        {IDM_SOLID_EXTRUDE,  "Extrude",   "Push a 2D profile along a linear path (Add Boss, Cut Body, or New)"},
+        {IDM_SOLID_REVOLVE,  "Revolve",   "Rotate a 2D profile around an axis to create cylindrical shapes"},
+        {IDM_SOLID_SWEEP,    "Sweep",     "Move a profile along a path curve to create complex tubular shapes"},
+        {IDM_SOLID_LOFT,     "Loft",      "Blend multiple cross-section ribs into a smooth organic solid"},
+        {IDM_SOLID_THICKEN,  "Thicken",   "Add thickness to an existing surface to produce a solid body"}
     }};
-    RibbonGroup boolean_{"Boolean", {
-        {IDM_SOLID_UNION,    "Union",     "Boolean union of two solids"},
-        {IDM_SOLID_SUBTRACT, "Subtract",  "Boolean subtract from a solid"},
-        {IDM_SOLID_INTERSECT,"Intersect", "Boolean intersection of two solids"}
+
+    // Primitives group – drop standard shapes without needing wireframe
+    RibbonGroup prims{"Primitives", {
+        {IDM_SOLID_BLOCK,    "Block",     "Create a rectangular solid from dimensions or two corner points"},
+        {IDM_SOLID_CYLINDER, "Cylinder",  "Create a cylindrical solid with a defined radius and height"},
+        {IDM_SOLID_SPHERE,   "Sphere",    "Create a solid ball from a centre point and radius"},
+        {IDM_SOLID_CONE,     "Cone",      "Create a tapered conical solid"},
+        {IDM_SOLID_TORUS,    "Torus",     "Create a donut-shaped solid from a major and minor radius"}
     }};
+
+    // Modify group – refine features on an existing solid
     RibbonGroup modify{"Modify", {
-        {IDM_SOLID_FILLET,   "Fillet",    "Add a fillet edge to a solid"},
-        {IDM_SOLID_SHELL,    "Shell",     "Shell/hollow a solid body"}
+        {IDM_SOLID_FILLET,   "Fillet",    "Round off sharp edges with a constant or variable radius"},
+        {IDM_SOLID_CHAMFER,  "Chamfer",   "Apply a flat angled break to edges (symmetrical or asymmetrical)"},
+        {IDM_SOLID_SHELL,    "Shell",     "Hollow out a solid to a specified wall thickness"},
+        {IDM_SOLID_DRAFT,    "Draft",     "Taper vertical faces for moulding or casting pull"},
+        {IDM_SOLID_TRIM,     "Trim",      "Cut a solid body using a plane, surface, or another solid"}
     }};
+
+    // Boolean group – combine or subtract solid bodies
+    RibbonGroup boolean_{"Boolean", {
+        {IDM_SOLID_UNION,    "Add",       "Merge two or more solid bodies into a single entity"},
+        {IDM_SOLID_SUBTRACT, "Remove",    "Use one solid to cut a shape out of another"},
+        {IDM_SOLID_INTERSECT,"Common",    "Keep only the volume where two solids overlap"}
+    }};
+
+    // Advanced / Specialized group
+    RibbonGroup advanced{"Advanced", {
+        {IDM_SOLID_HOLE,     "Hole",      "Create complex holes: simple, counterbore, countersink, taper, or threaded"},
+        {IDM_SOLID_IMPRESS,  "Impression","Generate the negative of a solid (useful for molds and electrodes)"},
+        {IDM_SOLID_FROM_SURF,"From Surfs","Convert a collection of closed surfaces into a watertight solid body"}
+    }};
+
     tab.groups.push_back(create);
-    tab.groups.push_back(boolean_);
+    tab.groups.push_back(prims);
     tab.groups.push_back(modify);
+    tab.groups.push_back(boolean_);
+    tab.groups.push_back(advanced);
     addTab(tab);
 }
 

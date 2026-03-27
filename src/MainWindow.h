@@ -129,15 +129,36 @@ constexpr int IDM_SURF_TRIM       = 4105;
 constexpr int IDM_SURF_UNTRIM     = 4106;
 constexpr int IDM_SURF_EXTEND     = 4107;
 
-// Solids tab commands
-constexpr int IDM_SOLID_EXTRUDE   = 4201;
-constexpr int IDM_SOLID_REVOLVE   = 4202;
-constexpr int IDM_SOLID_UNION     = 4203;
-constexpr int IDM_SOLID_SUBTRACT  = 4204;
-constexpr int IDM_SOLID_INTERSECT = 4205;
-constexpr int IDM_SOLID_SHELL     = 4206;
-constexpr int IDM_SOLID_FILLET    = 4207;
-constexpr int IDM_SOLID_SPHERE    = 4208;  // Create a parametric sphere
+// Solids tab commands – Create group (history-based, from wireframe chains)
+constexpr int IDM_SOLID_EXTRUDE   = 4201;  // Extrude a 2D profile into a solid
+constexpr int IDM_SOLID_REVOLVE   = 4202;  // Revolve a profile around an axis
+constexpr int IDM_SOLID_SWEEP     = 4209;  // Sweep a profile along a path curve
+constexpr int IDM_SOLID_LOFT      = 4210;  // Loft / blend multiple cross-sections
+constexpr int IDM_SOLID_THICKEN   = 4211;  // Add thickness to a surface to make a solid
+
+// Solids tab commands – Primitives group (direct geometric shapes, no wireframe needed)
+constexpr int IDM_SOLID_BLOCK     = 4212;  // Rectangular solid from dimensions or 2 points
+constexpr int IDM_SOLID_CYLINDER  = 4213;  // Cylindrical solid (radius + height)
+constexpr int IDM_SOLID_SPHERE    = 4208;  // Solid sphere (centre + radius)
+constexpr int IDM_SOLID_CONE      = 4214;  // Tapered conical solid
+constexpr int IDM_SOLID_TORUS     = 4215;  // Donut-shaped solid
+
+// Solids tab commands – Modify group (refine an existing solid)
+constexpr int IDM_SOLID_FILLET    = 4207;  // Round off edges with constant/variable radius
+constexpr int IDM_SOLID_CHAMFER   = 4216;  // Flat angled break on edges
+constexpr int IDM_SOLID_SHELL     = 4206;  // Hollow out a solid to a wall thickness
+constexpr int IDM_SOLID_DRAFT     = 4217;  // Taper vertical faces for moulding/casting
+constexpr int IDM_SOLID_TRIM      = 4218;  // Cut solid with a plane, surface, or solid
+
+// Solids tab commands – Boolean group (combine/subtract solid bodies)
+constexpr int IDM_SOLID_UNION     = 4203;  // Add: merge two or more solids
+constexpr int IDM_SOLID_SUBTRACT  = 4204;  // Remove: cut one solid from another
+constexpr int IDM_SOLID_INTERSECT = 4205;  // Common: keep only the overlapping volume
+
+// Solids tab commands – Advanced / Specialized
+constexpr int IDM_SOLID_HOLE      = 4219;  // Hole wizard (simple/counterbore/countersink/threaded)
+constexpr int IDM_SOLID_IMPRESS   = 4220;  // Impression: negative of a solid (mold / electrode)
+constexpr int IDM_SOLID_FROM_SURF = 4221;  // Convert closed surfaces to a watertight solid
 
 // Model Prep tab commands
 constexpr int IDM_PREP_HEAL       = 4301;
@@ -244,10 +265,20 @@ private:
     void showHelpTopics();            // F1
 
     // --- Solid creation (Solids tab) ---
-    void createSolidBox();        // IDM_SOLID_EXTRUDE: box via parameter dialog
-    void createSolidCylinder();   // IDM_SOLID_REVOLVE: cylinder via parameter dialog
+    void createSolidBox();        // IDM_SOLID_EXTRUDE: extrude/box via parameter dialog
+    void createSolidCylinder();   // IDM_SOLID_REVOLVE: revolve/cylinder via parameter dialog
     void createSolidSphere();     // IDM_SOLID_SPHERE: sphere via parameter dialog
+    void createSolidSweep();      // IDM_SOLID_SWEEP: sweep profile along a path
+    void createSolidLoft();       // IDM_SOLID_LOFT: loft/blend multiple cross-sections
+    void createSolidThicken();    // IDM_SOLID_THICKEN: add thickness to a surface
+    void createSolidBlock();      // IDM_SOLID_BLOCK: direct block primitive
+    void createSolidCone();       // IDM_SOLID_CONE: direct cone primitive
+    void createSolidTorus();      // IDM_SOLID_TORUS: direct torus primitive
+    void solidModify(int commandId);    // Fillet / Chamfer / Shell / Draft / Trim
     void solidBooleanOp(int commandId); // Union / Subtract / Intersect
+    void solidHole();             // IDM_SOLID_HOLE: hole wizard
+    void solidImpression();       // IDM_SOLID_IMPRESS: impression/negative of solid
+    void solidFromSurfaces();     // IDM_SOLID_FROM_SURF: closed surfaces → solid
 
     // --- Wireframe primitive creation (Wireframe tab) ---
     void createWireframe(int commandId);

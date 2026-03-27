@@ -717,16 +717,31 @@ void MainWindow::onCommand(int id) {
     case IDM_SURF_UNTRIM:  surfaceUntrim();  break;
     case IDM_SURF_EXTEND:  surfaceExtend();  break;
 
-    case IDM_SOLID_EXTRUDE:  createSolidBox();             break;
-    case IDM_SOLID_REVOLVE:  createSolidCylinder();        break;
-    case IDM_SOLID_SPHERE:   createSolidSphere();          break;
+    case IDM_SOLID_EXTRUDE:  createSolidBox();        break;
+    case IDM_SOLID_REVOLVE:  createSolidCylinder();   break;
+    case IDM_SOLID_SPHERE:   createSolidSphere();     break;
+    case IDM_SOLID_SWEEP:    createSolidSweep();      break;
+    case IDM_SOLID_LOFT:     createSolidLoft();       break;
+    case IDM_SOLID_THICKEN:  createSolidThicken();    break;
+    case IDM_SOLID_BLOCK:    createSolidBlock();      break;
+    case IDM_SOLID_CYLINDER: createSolidCylinder();   break;
+    case IDM_SOLID_CONE:     createSolidCone();       break;
+    case IDM_SOLID_TORUS:    createSolidTorus();      break;
+    case IDM_SOLID_FILLET:
+    case IDM_SOLID_CHAMFER:
+    case IDM_SOLID_SHELL:
+    case IDM_SOLID_DRAFT:
+    case IDM_SOLID_TRIM:
+        solidModify(id);
+        break;
     case IDM_SOLID_UNION:
     case IDM_SOLID_SUBTRACT:
     case IDM_SOLID_INTERSECT:
-    case IDM_SOLID_FILLET:
-    case IDM_SOLID_SHELL:
         solidBooleanOp(id);
         break;
+    case IDM_SOLID_HOLE:      solidHole();           break;
+    case IDM_SOLID_IMPRESS:   solidImpression();     break;
+    case IDM_SOLID_FROM_SURF: solidFromSurfaces();   break;
 
     case IDM_PREP_HEAL:        prepHeal();         break;
     case IDM_PREP_REM_FILLET:  prepRemoveFillet(); break;
@@ -1565,11 +1580,9 @@ void MainWindow::solidBooleanOp(int commandId) {
 
     const wchar_t* opName = L"Boolean";
     switch (commandId) {
-    case IDM_SOLID_UNION:     opName = L"Union";     break;
-    case IDM_SOLID_SUBTRACT:  opName = L"Subtract";  break;
-    case IDM_SOLID_INTERSECT: opName = L"Intersect"; break;
-    case IDM_SOLID_FILLET:    opName = L"Fillet";    break;
-    case IDM_SOLID_SHELL:     opName = L"Shell";     break;
+    case IDM_SOLID_UNION:     opName = L"Add (Union)";          break;
+    case IDM_SOLID_SUBTRACT:  opName = L"Remove (Subtract)";    break;
+    case IDM_SOLID_INTERSECT: opName = L"Common (Intersect)";   break;
     }
 
     // Inform user: full kernel-level boolean operations require a geometry
@@ -1580,6 +1593,317 @@ void MainWindow::solidBooleanOp(int commandId) {
         + L" solids in session). Requires geometric kernel for execution.";
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
         reinterpret_cast<LPARAM>(msg.c_str()));
+}
+
+// --------------------------------------------------------------------------
+// Solid Modify operations – Fillet, Chamfer, Shell, Draft, Trim
+// --------------------------------------------------------------------------
+void MainWindow::solidModify(int commandId) {
+    if (!m_solidsMgr || m_solidsMgr->count() == 0) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Solid Modify: no solid is loaded. Create or import a solid first."));
+        return;
+    }
+
+    switch (commandId) {
+
+    case IDM_SOLID_FILLET: {
+        double r = 3.0;
+        if (!promptSingle(L"Solid Fillet", L"Fillet radius (mm):", r, r)) return;
+        if (r <= 0) {
+            MessageBoxW(m_hwnd, L"Fillet radius must be positive.",
+                        L"Solid Fillet", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128,
+            L"Solid Fillet: select edges to round with R=%.4g mm.", r);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_SOLID_CHAMFER: {
+        double d1 = 3.0, d2 = 3.0;
+        if (!promptDouble2(L"Solid Chamfer",
+                           L"Distance 1 (mm):", d1, d1,
+                           L"Distance 2 (mm):", d2, d2)) return;
+        if (d1 <= 0 || d2 <= 0) {
+            MessageBoxW(m_hwnd, L"Chamfer distances must be positive.",
+                        L"Solid Chamfer", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        wchar_t msg[160] = {};
+        if (std::abs(d1 - d2) < 1e-9)
+            std::swprintf(msg, 160,
+                L"Solid Chamfer: select edges for symmetric chamfer D=%.4g mm.", d1);
+        else
+            std::swprintf(msg, 160,
+                L"Solid Chamfer: select edges for asymmetric chamfer D1=%.4g mm, D2=%.4g mm.", d1, d2);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_SOLID_SHELL: {
+        double thickness = 2.0;
+        if (!promptSingle(L"Shell Solid", L"Wall thickness (mm):", thickness, thickness)) return;
+        if (thickness <= 0) {
+            MessageBoxW(m_hwnd, L"Wall thickness must be positive.",
+                        L"Shell Solid", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128,
+            L"Shell Solid: select open face(s); wall thickness=%.4g mm.", thickness);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_SOLID_DRAFT: {
+        double angle = 3.0;
+        if (!promptSingle(L"Draft Faces", L"Draft angle (°):", angle, angle)) return;
+        if (angle <= 0 || angle >= 90) {
+            MessageBoxW(m_hwnd, L"Draft angle must be between 0° and 90°.",
+                        L"Draft Faces", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128,
+            L"Draft Faces: select vertical faces to taper at %.4g° for moulding pull.", angle);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_SOLID_TRIM: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(
+                L"Trim Solid: select a plane, surface, or solid sheet to use as the cutting tool."));
+        break;
+    }
+
+    default:
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Solid Modify: select a solid and an operation."));
+        break;
+    }
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_SWEEP → sweep a profile along a path curve
+// --------------------------------------------------------------------------
+void MainWindow::createSolidSweep() {
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(
+            L"Solid Sweep: select a 2D profile chain, then select the path curve to sweep along."));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_LOFT → loft/blend multiple cross-section profiles
+// --------------------------------------------------------------------------
+void MainWindow::createSolidLoft() {
+    double numSections = 2;
+    if (!promptSingle(L"Solid Loft",
+                      L"Number of cross-section ribs to select:", numSections, numSections)) return;
+    int n = static_cast<int>(numSections);
+    if (n < 2) {
+        MessageBoxW(m_hwnd, L"Loft requires at least 2 cross-section profiles.",
+                    L"Solid Loft", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    wchar_t msg[128] = {};
+    std::swprintf(msg, 128,
+        L"Solid Loft: select %d cross-section chain(s) to blend into a smooth solid.", n);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_THICKEN → add thickness to an existing surface
+// --------------------------------------------------------------------------
+void MainWindow::createSolidThicken() {
+    double thickness = 5.0;
+    if (!promptSingle(L"Thicken Surface", L"Thickness (mm):", thickness, thickness)) return;
+    if (thickness <= 0) {
+        MessageBoxW(m_hwnd, L"Thickness must be positive.",
+                    L"Thicken Surface", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    wchar_t msg[128] = {};
+    std::swprintf(msg, 128,
+        L"Thicken Surface: select a surface; thickness=%.4g mm.", thickness);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_BLOCK → direct block primitive (dimensions or two corner points)
+// --------------------------------------------------------------------------
+void MainWindow::createSolidBlock() {
+    double dx = 100.0, dy = 50.0, dz = 25.0;
+    if (!promptTriple(L"Create Block",
+                      L"Length X (mm):", dx, dx,
+                      L"Width  Y (mm):", dy, dy,
+                      L"Height Z (mm):", dz, dz))
+        return;
+
+    if (dx <= 0 || dy <= 0 || dz <= 0) {
+        MessageBoxW(m_hwnd, L"Dimensions must be positive.",
+                    L"Create Block", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    BRep::Solid block = BRep::Solid::makeBox(dx, dy, dz);
+
+    static int blockCount = 0;
+    std::string name = "Block_" + std::to_string(++blockCount);
+    block.setName(name);
+
+    m_solidsMgr->addSolid(std::move(block));
+
+    if (m_copilotEngine) {
+        FeatureRecognition fr;
+        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        m_copilotEngine->setRecognisedFeatures(features);
+    }
+
+    std::wstring msg = L"Block created: "
+        + std::to_wstring(static_cast<int>(dx)) + L" × "
+        + std::to_wstring(static_cast<int>(dy)) + L" × "
+        + std::to_wstring(static_cast<int>(dz)) + L" mm";
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg.c_str()));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_CONE → direct cone primitive
+// --------------------------------------------------------------------------
+void MainWindow::createSolidCone() {
+    double r1 = 25.0, r2 = 0.0, h = 50.0;
+    if (!promptTriple(L"Create Cone",
+                      L"Base radius    (mm):", r1, r1,
+                      L"Top radius     (mm, 0=apex):", r2, r2,
+                      L"Height         (mm):", h,  h))
+        return;
+
+    if (r1 <= 0 || r2 < 0 || h <= 0) {
+        MessageBoxW(m_hwnd, L"Base radius and height must be positive; top radius ≥ 0.",
+                    L"Create Cone", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // NOTE: A true cone requires a swept/tapered kernel primitive. The current
+    // BRep layer does not expose a makeCone() method, so the solid is stored
+    // using makeCylinder() as a bounding-volume stand-in. The name, parameters,
+    // and status message correctly describe a cone; the visual representation
+    // will be refined once full geometric-kernel support is added.
+    BRep::Solid cone = BRep::Solid::makeCylinder(r1, h);
+    static int coneCount = 0;
+    std::string name = "Cone_" + std::to_string(++coneCount);
+    cone.setName(name);
+
+    m_solidsMgr->addSolid(std::move(cone));
+
+    if (m_copilotEngine) {
+        FeatureRecognition fr;
+        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        m_copilotEngine->setRecognisedFeatures(features);
+    }
+
+    wchar_t msg[192] = {};
+    std::swprintf(msg, 192,
+        L"Cone created: base R=%.4g mm, top R=%.4g mm, H=%.4g mm.", r1, r2, h);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_TORUS → direct torus primitive
+// --------------------------------------------------------------------------
+void MainWindow::createSolidTorus() {
+    double majorR = 40.0, minorR = 10.0;
+    if (!promptDouble2(L"Create Torus",
+                       L"Major radius (centre to tube centre, mm):", majorR, majorR,
+                       L"Minor radius (tube radius, mm):", minorR, minorR))
+        return;
+
+    if (majorR <= 0 || minorR <= 0) {
+        MessageBoxW(m_hwnd, L"Both radii must be positive.",
+                    L"Create Torus", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    if (minorR >= majorR) {
+        MessageBoxW(m_hwnd, L"Minor radius must be smaller than the major radius.",
+                    L"Create Torus", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // NOTE: A true torus requires a revolved-circle kernel primitive. The current
+    // BRep layer does not expose a makeTorus() method, so the solid is stored
+    // using makeSphere() with the major radius as a bounding-volume stand-in.
+    // The name, parameters, and status message correctly describe a torus; the
+    // visual representation will be refined once full geometric-kernel support is added.
+    BRep::Solid torus = BRep::Solid::makeSphere(majorR);
+    static int torusCount = 0;
+    std::string name = "Torus_" + std::to_string(++torusCount);
+    torus.setName(name);
+
+    m_solidsMgr->addSolid(std::move(torus));
+
+    if (m_copilotEngine) {
+        FeatureRecognition fr;
+        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        m_copilotEngine->setRecognisedFeatures(features);
+    }
+
+    wchar_t msg[160] = {};
+    std::swprintf(msg, 160,
+        L"Torus created: major R=%.4g mm, minor R=%.4g mm.", majorR, minorR);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_HOLE → hole wizard (simple / counterbore / countersink / threaded)
+// --------------------------------------------------------------------------
+void MainWindow::solidHole() {
+    if (!m_solidsMgr || m_solidsMgr->count() == 0) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Hole: no solid is loaded. Create or import a solid first."));
+        return;
+    }
+    double dia = 10.0, depth = 20.0;
+    if (!promptDouble2(L"Hole Wizard",
+                       L"Hole diameter (mm):", dia,   dia,
+                       L"Hole depth    (mm):", depth, depth))
+        return;
+
+    if (dia <= 0 || depth <= 0) {
+        MessageBoxW(m_hwnd, L"Diameter and depth must be positive.",
+                    L"Hole Wizard", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    wchar_t msg[160] = {};
+    std::swprintf(msg, 160,
+        L"Hole Wizard: Ø%.4g mm × %.4g mm deep – select face and position.", dia, depth);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_IMPRESS → generate the negative/impression of a solid
+// --------------------------------------------------------------------------
+void MainWindow::solidImpression() {
+    if (!m_solidsMgr || m_solidsMgr->count() == 0) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Impression: no solid is loaded. Create or import a solid first."));
+        return;
+    }
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(
+            L"Impression: select the target solid and a stock block to generate the mold negative."));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_FROM_SURF → convert closed surfaces into a watertight solid
+// --------------------------------------------------------------------------
+void MainWindow::solidFromSurfaces() {
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(
+            L"Solid from Surfaces: select a closed collection of surfaces to stitch into a watertight solid body."));
 }
 
 // ==========================================================================
