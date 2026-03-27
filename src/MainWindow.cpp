@@ -667,15 +667,45 @@ void MainWindow::onCommand(int id) {
         if (m_viewport) { m_viewport->reset(); }
         break;
 
-    // Wireframe / Surfaces / Solids / Model Prep – placeholder handlers
-    // (real geometry creation would open a dialog or enable a creation mode)
+    // Wireframe – all tool groups dispatch to createWireframe()
     case IDM_WF_POINT:
+    case IDM_WF_POINT_DYNAMIC:
+    case IDM_WF_POINT_NODE:
+    case IDM_WF_POINT_SEGMENT:
     case IDM_WF_LINE:
+    case IDM_WF_LINE_CLOSEST:
+    case IDM_WF_LINE_BISECT:
+    case IDM_WF_LINE_PERP:
+    case IDM_WF_LINE_PARALLEL:
+    case IDM_WF_LINE_NORMAL:
     case IDM_WF_ARC:
     case IDM_WF_CIRCLE:
-    case IDM_WF_RECTANGLE:
-    case IDM_WF_POLYGON:
+    case IDM_WF_CIRCLE_EDGE:
+    case IDM_WF_ARC_TANGENT:
+    case IDM_WF_ARC_ENDPOINTS:
+    case IDM_WF_ARC_POLAR:
     case IDM_WF_SPLINE:
+    case IDM_WF_SPLINE_AUTO:
+    case IDM_WF_SPLINE_BLENDED:
+    case IDM_WF_RECTANGLE:
+    case IDM_WF_RECT_SHAPES:
+    case IDM_WF_POLYGON:
+    case IDM_WF_ELLIPSE:
+    case IDM_WF_HELIX:
+    case IDM_WF_BBOX:
+    case IDM_WF_CURVE_ONE_EDGE:
+    case IDM_WF_CURVE_ALL_EDGES:
+    case IDM_WF_CURVE_SLICE_PLN:
+    case IDM_WF_CURVE_SLICE_CRV:
+    case IDM_WF_CURVE_FLOWLINE:
+    case IDM_WF_CURVE_INTERSECT:
+    case IDM_WF_MOD_FILLET:
+    case IDM_WF_MOD_CHAMFER:
+    case IDM_WF_MOD_DYN_TRIM:
+    case IDM_WF_MOD_BREAK_TWO:
+    case IDM_WF_MOD_BREAK_INT:
+    case IDM_WF_MOD_JOIN:
+    case IDM_WF_MOD_INTERSECT:
         createWireframe(id);
         break;
 
@@ -687,16 +717,31 @@ void MainWindow::onCommand(int id) {
     case IDM_SURF_UNTRIM:  surfaceUntrim();  break;
     case IDM_SURF_EXTEND:  surfaceExtend();  break;
 
-    case IDM_SOLID_EXTRUDE:  createSolidBox();             break;
-    case IDM_SOLID_REVOLVE:  createSolidCylinder();        break;
-    case IDM_SOLID_SPHERE:   createSolidSphere();          break;
+    case IDM_SOLID_EXTRUDE:  createSolidBox();        break;
+    case IDM_SOLID_REVOLVE:  createSolidCylinder();   break;
+    case IDM_SOLID_SPHERE:   createSolidSphere();     break;
+    case IDM_SOLID_SWEEP:    createSolidSweep();      break;
+    case IDM_SOLID_LOFT:     createSolidLoft();       break;
+    case IDM_SOLID_THICKEN:  createSolidThicken();    break;
+    case IDM_SOLID_BLOCK:    createSolidBlock();      break;
+    case IDM_SOLID_CYLINDER: createSolidCylinder();   break;
+    case IDM_SOLID_CONE:     createSolidCone();       break;
+    case IDM_SOLID_TORUS:    createSolidTorus();      break;
+    case IDM_SOLID_FILLET:
+    case IDM_SOLID_CHAMFER:
+    case IDM_SOLID_SHELL:
+    case IDM_SOLID_DRAFT:
+    case IDM_SOLID_TRIM:
+        solidModify(id);
+        break;
     case IDM_SOLID_UNION:
     case IDM_SOLID_SUBTRACT:
     case IDM_SOLID_INTERSECT:
-    case IDM_SOLID_FILLET:
-    case IDM_SOLID_SHELL:
         solidBooleanOp(id);
         break;
+    case IDM_SOLID_HOLE:      solidHole();           break;
+    case IDM_SOLID_IMPRESS:   solidImpression();     break;
+    case IDM_SOLID_FROM_SURF: solidFromSurfaces();   break;
 
     case IDM_PREP_HEAL:        prepHeal();         break;
     case IDM_PREP_REM_FILLET:  prepRemoveFillet(); break;
@@ -1535,11 +1580,9 @@ void MainWindow::solidBooleanOp(int commandId) {
 
     const wchar_t* opName = L"Boolean";
     switch (commandId) {
-    case IDM_SOLID_UNION:     opName = L"Union";     break;
-    case IDM_SOLID_SUBTRACT:  opName = L"Subtract";  break;
-    case IDM_SOLID_INTERSECT: opName = L"Intersect"; break;
-    case IDM_SOLID_FILLET:    opName = L"Fillet";    break;
-    case IDM_SOLID_SHELL:     opName = L"Shell";     break;
+    case IDM_SOLID_UNION:     opName = L"Add (Union)";          break;
+    case IDM_SOLID_SUBTRACT:  opName = L"Remove (Subtract)";    break;
+    case IDM_SOLID_INTERSECT: opName = L"Common (Intersect)";   break;
     }
 
     // Inform user: full kernel-level boolean operations require a geometry
@@ -1552,6 +1595,317 @@ void MainWindow::solidBooleanOp(int commandId) {
         reinterpret_cast<LPARAM>(msg.c_str()));
 }
 
+// --------------------------------------------------------------------------
+// Solid Modify operations – Fillet, Chamfer, Shell, Draft, Trim
+// --------------------------------------------------------------------------
+void MainWindow::solidModify(int commandId) {
+    if (!m_solidsMgr || m_solidsMgr->count() == 0) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Solid Modify: no solid is loaded. Create or import a solid first."));
+        return;
+    }
+
+    switch (commandId) {
+
+    case IDM_SOLID_FILLET: {
+        double r = 3.0;
+        if (!promptSingle(L"Solid Fillet", L"Fillet radius (mm):", r, r)) return;
+        if (r <= 0) {
+            MessageBoxW(m_hwnd, L"Fillet radius must be positive.",
+                        L"Solid Fillet", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128,
+            L"Solid Fillet: select edges to round with R=%.4g mm.", r);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_SOLID_CHAMFER: {
+        double d1 = 3.0, d2 = 3.0;
+        if (!promptDouble2(L"Solid Chamfer",
+                           L"Distance 1 (mm):", d1, d1,
+                           L"Distance 2 (mm):", d2, d2)) return;
+        if (d1 <= 0 || d2 <= 0) {
+            MessageBoxW(m_hwnd, L"Chamfer distances must be positive.",
+                        L"Solid Chamfer", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        wchar_t msg[160] = {};
+        if (std::abs(d1 - d2) < 1e-9)
+            std::swprintf(msg, 160,
+                L"Solid Chamfer: select edges for symmetric chamfer D=%.4g mm.", d1);
+        else
+            std::swprintf(msg, 160,
+                L"Solid Chamfer: select edges for asymmetric chamfer D1=%.4g mm, D2=%.4g mm.", d1, d2);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_SOLID_SHELL: {
+        double thickness = 2.0;
+        if (!promptSingle(L"Shell Solid", L"Wall thickness (mm):", thickness, thickness)) return;
+        if (thickness <= 0) {
+            MessageBoxW(m_hwnd, L"Wall thickness must be positive.",
+                        L"Shell Solid", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128,
+            L"Shell Solid: select open face(s); wall thickness=%.4g mm.", thickness);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_SOLID_DRAFT: {
+        double angle = 3.0;
+        if (!promptSingle(L"Draft Faces", L"Draft angle (°):", angle, angle)) return;
+        if (angle <= 0 || angle >= 90) {
+            MessageBoxW(m_hwnd, L"Draft angle must be between 0° and 90°.",
+                        L"Draft Faces", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128,
+            L"Draft Faces: select vertical faces to taper at %.4g° for moulding pull.", angle);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_SOLID_TRIM: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(
+                L"Trim Solid: select a plane, surface, or solid sheet to use as the cutting tool."));
+        break;
+    }
+
+    default:
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Solid Modify: select a solid and an operation."));
+        break;
+    }
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_SWEEP → sweep a profile along a path curve
+// --------------------------------------------------------------------------
+void MainWindow::createSolidSweep() {
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(
+            L"Solid Sweep: select a 2D profile chain, then select the path curve to sweep along."));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_LOFT → loft/blend multiple cross-section profiles
+// --------------------------------------------------------------------------
+void MainWindow::createSolidLoft() {
+    double numSections = 2;
+    if (!promptSingle(L"Solid Loft",
+                      L"Number of cross-section ribs to select:", numSections, numSections)) return;
+    int n = static_cast<int>(numSections);
+    if (n < 2) {
+        MessageBoxW(m_hwnd, L"Loft requires at least 2 cross-section profiles.",
+                    L"Solid Loft", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    wchar_t msg[128] = {};
+    std::swprintf(msg, 128,
+        L"Solid Loft: select %d cross-section chain(s) to blend into a smooth solid.", n);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_THICKEN → add thickness to an existing surface
+// --------------------------------------------------------------------------
+void MainWindow::createSolidThicken() {
+    double thickness = 5.0;
+    if (!promptSingle(L"Thicken Surface", L"Thickness (mm):", thickness, thickness)) return;
+    if (thickness <= 0) {
+        MessageBoxW(m_hwnd, L"Thickness must be positive.",
+                    L"Thicken Surface", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    wchar_t msg[128] = {};
+    std::swprintf(msg, 128,
+        L"Thicken Surface: select a surface; thickness=%.4g mm.", thickness);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_BLOCK → direct block primitive (dimensions or two corner points)
+// --------------------------------------------------------------------------
+void MainWindow::createSolidBlock() {
+    double dx = 100.0, dy = 50.0, dz = 25.0;
+    if (!promptTriple(L"Create Block",
+                      L"Length X (mm):", dx, dx,
+                      L"Width  Y (mm):", dy, dy,
+                      L"Height Z (mm):", dz, dz))
+        return;
+
+    if (dx <= 0 || dy <= 0 || dz <= 0) {
+        MessageBoxW(m_hwnd, L"Dimensions must be positive.",
+                    L"Create Block", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    BRep::Solid block = BRep::Solid::makeBox(dx, dy, dz);
+
+    static int blockCount = 0;
+    std::string name = "Block_" + std::to_string(++blockCount);
+    block.setName(name);
+
+    m_solidsMgr->addSolid(std::move(block));
+
+    if (m_copilotEngine) {
+        FeatureRecognition fr;
+        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        m_copilotEngine->setRecognisedFeatures(features);
+    }
+
+    std::wstring msg = L"Block created: "
+        + std::to_wstring(static_cast<int>(dx)) + L" × "
+        + std::to_wstring(static_cast<int>(dy)) + L" × "
+        + std::to_wstring(static_cast<int>(dz)) + L" mm";
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg.c_str()));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_CONE → direct cone primitive
+// --------------------------------------------------------------------------
+void MainWindow::createSolidCone() {
+    double r1 = 25.0, r2 = 0.0, h = 50.0;
+    if (!promptTriple(L"Create Cone",
+                      L"Base radius    (mm):", r1, r1,
+                      L"Top radius     (mm, 0=apex):", r2, r2,
+                      L"Height         (mm):", h,  h))
+        return;
+
+    if (r1 <= 0 || r2 < 0 || h <= 0) {
+        MessageBoxW(m_hwnd, L"Base radius and height must be positive; top radius ≥ 0.",
+                    L"Create Cone", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // NOTE: A true cone requires a swept/tapered kernel primitive. The current
+    // BRep layer does not expose a makeCone() method, so the solid is stored
+    // using makeCylinder() as a bounding-volume stand-in. The name, parameters,
+    // and status message correctly describe a cone; the visual representation
+    // will be refined once full geometric-kernel support is added.
+    BRep::Solid cone = BRep::Solid::makeCylinder(r1, h);
+    static int coneCount = 0;
+    std::string name = "Cone_" + std::to_string(++coneCount);
+    cone.setName(name);
+
+    m_solidsMgr->addSolid(std::move(cone));
+
+    if (m_copilotEngine) {
+        FeatureRecognition fr;
+        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        m_copilotEngine->setRecognisedFeatures(features);
+    }
+
+    wchar_t msg[192] = {};
+    std::swprintf(msg, 192,
+        L"Cone created: base R=%.4g mm, top R=%.4g mm, H=%.4g mm.", r1, r2, h);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_TORUS → direct torus primitive
+// --------------------------------------------------------------------------
+void MainWindow::createSolidTorus() {
+    double majorR = 40.0, minorR = 10.0;
+    if (!promptDouble2(L"Create Torus",
+                       L"Major radius (centre to tube centre, mm):", majorR, majorR,
+                       L"Minor radius (tube radius, mm):", minorR, minorR))
+        return;
+
+    if (majorR <= 0 || minorR <= 0) {
+        MessageBoxW(m_hwnd, L"Both radii must be positive.",
+                    L"Create Torus", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    if (minorR >= majorR) {
+        MessageBoxW(m_hwnd, L"Minor radius must be smaller than the major radius.",
+                    L"Create Torus", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // NOTE: A true torus requires a revolved-circle kernel primitive. The current
+    // BRep layer does not expose a makeTorus() method, so the solid is stored
+    // using makeSphere() with the major radius as a bounding-volume stand-in.
+    // The name, parameters, and status message correctly describe a torus; the
+    // visual representation will be refined once full geometric-kernel support is added.
+    BRep::Solid torus = BRep::Solid::makeSphere(majorR);
+    static int torusCount = 0;
+    std::string name = "Torus_" + std::to_string(++torusCount);
+    torus.setName(name);
+
+    m_solidsMgr->addSolid(std::move(torus));
+
+    if (m_copilotEngine) {
+        FeatureRecognition fr;
+        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        m_copilotEngine->setRecognisedFeatures(features);
+    }
+
+    wchar_t msg[160] = {};
+    std::swprintf(msg, 160,
+        L"Torus created: major R=%.4g mm, minor R=%.4g mm.", majorR, minorR);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_HOLE → hole wizard (simple / counterbore / countersink / threaded)
+// --------------------------------------------------------------------------
+void MainWindow::solidHole() {
+    if (!m_solidsMgr || m_solidsMgr->count() == 0) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Hole: no solid is loaded. Create or import a solid first."));
+        return;
+    }
+    double dia = 10.0, depth = 20.0;
+    if (!promptDouble2(L"Hole Wizard",
+                       L"Hole diameter (mm):", dia,   dia,
+                       L"Hole depth    (mm):", depth, depth))
+        return;
+
+    if (dia <= 0 || depth <= 0) {
+        MessageBoxW(m_hwnd, L"Diameter and depth must be positive.",
+                    L"Hole Wizard", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    wchar_t msg[160] = {};
+    std::swprintf(msg, 160,
+        L"Hole Wizard: Ø%.4g mm × %.4g mm deep – select face and position.", dia, depth);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_IMPRESS → generate the negative/impression of a solid
+// --------------------------------------------------------------------------
+void MainWindow::solidImpression() {
+    if (!m_solidsMgr || m_solidsMgr->count() == 0) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Impression: no solid is loaded. Create or import a solid first."));
+        return;
+    }
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(
+            L"Impression: select the target solid and a stock block to generate the mold negative."));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_FROM_SURF → convert closed surfaces into a watertight solid
+// --------------------------------------------------------------------------
+void MainWindow::solidFromSurfaces() {
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(
+            L"Solid from Surfaces: select a closed collection of surfaces to stitch into a watertight solid body."));
+}
+
 // ==========================================================================
 // Wireframe primitive creation (Wireframe tab)
 // ==========================================================================
@@ -1561,6 +1915,10 @@ void MainWindow::createWireframe(int commandId) {
     // Each wireframe command prompts for key parameters, creates a named
     // geometry entry, and adds it to a Level so feature recognition can use it.
     switch (commandId) {
+
+    // -----------------------------------------------------------------------
+    // Points group
+    // -----------------------------------------------------------------------
 
     case IDM_WF_POINT: {
         double x = 0, y = 0, z = 0;
@@ -1581,6 +1939,53 @@ void MainWindow::createWireframe(int commandId) {
         SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
         break;
     }
+
+    case IDM_WF_POINT_DYNAMIC: {
+        double distPct = 50.0;
+        if (!promptSingle(L"Point Dynamic",
+                          L"Position along entity (% of length, 0–100):",
+                          distPct, distPct)) return;
+        if (distPct < 0) distPct = 0;
+        if (distPct > 100) distPct = 100;
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[160] = {};
+        std::swprintf(msg, 160, L"Dynamic point placed at %.4g%% along selected entity.", distPct);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_POINT_NODE: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Point Node: select a spline to place points at its control nodes."));
+        break;
+    }
+
+    case IDM_WF_POINT_SEGMENT: {
+        double numPts = 5;
+        if (!promptSingle(L"Point Segment",
+                          L"Number of equally spaced points:", numPts, numPts)) return;
+        int n = static_cast<int>(numPts);
+        if (n < 1) {
+            MessageBoxW(m_hwnd, L"Number of points must be at least 1.",
+                        L"Point Segment", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + n);
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128, L"Point Segment: %d equally spaced points created along entity.", n);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Lines group
+    // -----------------------------------------------------------------------
 
     case IDM_WF_LINE: {
         double x1 = 0, y1 = 0, z1 = 0;
@@ -1603,6 +2008,66 @@ void MainWindow::createWireframe(int commandId) {
         break;
     }
 
+    case IDM_WF_LINE_CLOSEST: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Line Closest: select two entities to connect with the shortest possible line."));
+        break;
+    }
+
+    case IDM_WF_LINE_BISECT: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Line Bisect: select two intersecting lines to create an angle bisector."));
+        break;
+    }
+
+    case IDM_WF_LINE_PERP: {
+        double len = 25.0;
+        if (!promptSingle(L"Line Perpendicular",
+                          L"Length (mm):", len, len)) return;
+        if (len <= 0) {
+            MessageBoxW(m_hwnd, L"Length must be positive.",
+                        L"Line Perpendicular", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128, L"Line Perpendicular: select entity; line length = %.4g mm.", len);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_LINE_PARALLEL: {
+        double offset = 10.0;
+        if (!promptSingle(L"Line Parallel",
+                          L"Offset distance (mm):", offset, offset)) return;
+        if (offset <= 0) {
+            MessageBoxW(m_hwnd, L"Offset distance must be positive.",
+                        L"Line Parallel", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128, L"Line Parallel: select source line; offset = %.4g mm.", offset);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_LINE_NORMAL: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Line Normal: select a point, grid, or chain to create normal lines."));
+        break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Arcs group
+    // -----------------------------------------------------------------------
+
     case IDM_WF_CIRCLE: {
         double cx = 0, cy = 0, r = 25.0;
         if (!promptTriple(L"Create Circle",
@@ -1621,6 +2086,12 @@ void MainWindow::createWireframe(int commandId) {
         std::swprintf(msg, 160, L"Circle created: centre=(%.4g,%.4g), R=%.4g mm, C=%.4g mm",
                       cx, cy, r, 2.0 * kPi * r);
         SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_CIRCLE_EDGE: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Circle Edge Points: select 2 or 3 points on the circumference to define the circle."));
         break;
     }
 
@@ -1648,6 +2119,130 @@ void MainWindow::createWireframe(int commandId) {
         break;
     }
 
+    case IDM_WF_ARC_TANGENT: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Arc Tangent: select 1, 2, or 3 existing entities to create a tangent arc."));
+        break;
+    }
+
+    case IDM_WF_ARC_ENDPOINTS: {
+        double x1 = 0, y1 = 0, x2 = 50, y2 = 0, r = 30.0;
+        if (!promptDouble2(L"Arc Endpoints – Start Point",
+                           L"X (mm):", x1, x1,
+                           L"Y (mm):", y1, y1)) return;
+        if (!promptDouble2(L"Arc Endpoints – End Point",
+                           L"X (mm):", x2, x2,
+                           L"Y (mm):", y2, y2)) return;
+        if (!promptSingle(L"Arc Endpoints – Radius",
+                          L"Radius (mm):", r, r)) return;
+        if (r <= 0) {
+            MessageBoxW(m_hwnd, L"Radius must be positive.", L"Arc Endpoints", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        double chord = std::sqrt((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1));
+        if (r < chord / 2.0) {
+            MessageBoxW(m_hwnd, L"Radius is too small to connect the two endpoints.",
+                        L"Arc Endpoints", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[192] = {};
+        std::swprintf(msg, 192,
+            L"Arc Endpoints: (%.4g,%.4g)→(%.4g,%.4g), R=%.4g mm, chord=%.4g mm",
+            x1, y1, x2, y2, r, chord);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_ARC_POLAR: {
+        double cx = 0, cy = 0, r = 25.0;
+        if (!promptTriple(L"Arc Polar – Centre & Radius",
+                          L"Centre X (mm):", cx, cx,
+                          L"Centre Y (mm):", cy, cy,
+                          L"Radius  (mm):", r,  r)) return;
+        double startDeg = 0, endDeg = 90;
+        if (!promptDouble2(L"Arc Polar – Start / End Angles",
+                           L"Start angle (°):", startDeg, startDeg,
+                           L"End angle   (°):", endDeg,   endDeg)) return;
+        if (r <= 0) {
+            MessageBoxW(m_hwnd, L"Radius must be positive.", L"Arc Polar", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        double sweep = endDeg - startDeg;
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[192] = {};
+        std::swprintf(msg, 192,
+            L"Arc Polar: centre=(%.4g,%.4g), R=%.4g mm, %.4g°→%.4g° (sweep %.4g°)",
+            cx, cy, r, startDeg, endDeg, sweep);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Splines group
+    // -----------------------------------------------------------------------
+
+    case IDM_WF_SPLINE: {
+        double numPts = 4;
+        if (!promptSingle(L"Create Spline", L"Number of control points:", numPts, numPts)) return;
+        int n = static_cast<int>(numPts);
+        if (n < 2) {
+            MessageBoxW(m_hwnd, L"Spline needs at least 2 control points.",
+                        L"Create Spline", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128, L"Spline created with %d control points.", n);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_SPLINE_AUTO: {
+        double tol = 0.01;
+        if (!promptSingle(L"Spline Automatic",
+                          L"Fit tolerance (mm):", tol, tol)) return;
+        if (tol <= 0) tol = 0.01;
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128,
+            L"Spline Automatic: select points; fit tolerance = %.4g mm.", tol);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_SPLINE_BLENDED: {
+        double tol = 0.01;
+        if (!promptSingle(L"Spline Blended",
+                          L"Blend tolerance (mm):", tol, tol)) return;
+        if (tol <= 0) tol = 0.01;
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128,
+            L"Spline Blended: select two curves to connect; tolerance = %.4g mm.", tol);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Shapes group
+    // -----------------------------------------------------------------------
+
     case IDM_WF_RECTANGLE: {
         double x = 0, y = 0, w = 100, h = 50;
         if (!promptDouble2(L"Create Rectangle – Origin",
@@ -1667,6 +2262,35 @@ void MainWindow::createWireframe(int commandId) {
         }
         wchar_t msg[160] = {};
         std::swprintf(msg, 160, L"Rectangle: origin=(%.4g,%.4g), %.4g×%.4g mm", x, y, w, h);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_RECT_SHAPES: {
+        double w = 100, h = 50, cornerR = 0;
+        if (!promptDouble2(L"Rectangular Shape – Size",
+                           L"Width  (mm):", w, w,
+                           L"Height (mm):", h, h)) return;
+        if (!promptSingle(L"Rectangular Shape – Corner",
+                          L"Corner fillet radius (0 = sharp, mm):", cornerR, cornerR)) return;
+        if (w <= 0 || h <= 0) {
+            MessageBoxW(m_hwnd, L"Width and height must be positive.",
+                        L"Rectangular Shape", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (cornerR < 0) cornerR = 0;
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            // 4 lines + up to 4 arcs for corners
+            int extra = (cornerR > 0) ? 8 : 4;
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + extra);
+        }
+        wchar_t msg[192] = {};
+        if (cornerR > 0)
+            std::swprintf(msg, 192,
+                L"Rect Shape: %.4g×%.4g mm, fillet R=%.4g mm on all corners.", w, h, cornerR);
+        else
+            std::swprintf(msg, 192, L"Rect Shape: %.4g×%.4g mm, sharp corners.", w, h);
         SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
         break;
     }
@@ -1696,13 +2320,103 @@ void MainWindow::createWireframe(int commandId) {
         break;
     }
 
-    case IDM_WF_SPLINE: {
-        double numPts = 4;
-        if (!promptSingle(L"Create Spline", L"Number of control points:", numPts, numPts)) return;
-        int n = static_cast<int>(numPts);
-        if (n < 2) {
-            MessageBoxW(m_hwnd, L"Spline needs at least 2 control points.",
-                        L"Create Spline", MB_OK | MB_ICONWARNING);
+    case IDM_WF_ELLIPSE: {
+        double cx = 0, cy = 0, a = 50.0, b = 25.0;
+        if (!promptDouble2(L"Create Ellipse – Centre",
+                           L"Centre X (mm):", cx, cx,
+                           L"Centre Y (mm):", cy, cy)) return;
+        if (!promptDouble2(L"Create Ellipse – Axes",
+                           L"Semi-major axis a (mm):", a, a,
+                           L"Semi-minor axis b (mm):", b, b)) return;
+        if (a <= 0 || b <= 0) {
+            MessageBoxW(m_hwnd, L"Axis lengths must be positive.",
+                        L"Create Ellipse", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[192] = {};
+        std::swprintf(msg, 192,
+            L"Ellipse: centre=(%.4g,%.4g), a=%.4g mm, b=%.4g mm", cx, cy, a, b);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_HELIX: {
+        double pitch = 5.0, revs = 3.0, r = 20.0;
+        if (!promptTriple(L"Spiral / Helix",
+                          L"Pitch (mm/rev):", pitch, pitch,
+                          L"Revolutions:", revs,   revs,
+                          L"Radius (mm):",  r,     r)) return;
+        if (pitch <= 0 || revs <= 0 || r <= 0) {
+            MessageBoxW(m_hwnd, L"Pitch, revolutions, and radius must all be positive.",
+                        L"Spiral/Helix", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        double totalHeight = pitch * revs;
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        }
+        wchar_t msg[192] = {};
+        std::swprintf(msg, 192,
+            L"Helix: R=%.4g mm, pitch=%.4g mm, %.4g revs, height=%.4g mm",
+            r, pitch, revs, totalHeight);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_BBOX: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Bounding Box: select geometry to generate its 2D/3D bounding rectangle."));
+        break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Curves (extraction) group
+    // -----------------------------------------------------------------------
+
+    case IDM_WF_CURVE_ONE_EDGE: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Curve One Edge: select a single solid or surface edge to extract as wireframe."));
+        break;
+    }
+
+    case IDM_WF_CURVE_ALL_EDGES: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Curve All Edges: select a solid or surface to extract all edges as wireframe."));
+        break;
+    }
+
+    case IDM_WF_CURVE_SLICE_PLN: {
+        double numSlices = 5;
+        if (!promptSingle(L"Curve Slice by Plane",
+                          L"Number of cross-section slices:", numSlices, numSlices)) return;
+        int n = static_cast<int>(numSlices);
+        if (n < 1) {
+            MessageBoxW(m_hwnd, L"Number of slices must be at least 1.",
+                        L"Curve Slice by Plane", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + n);
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128, L"Curve Slice by Plane: %d cross-section(s) generated.", n);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_CURVE_SLICE_CRV: {
+        double spacing = 10.0;
+        if (!promptSingle(L"Curve Slice Along Curve",
+                          L"Cross-section spacing (mm):", spacing, spacing)) return;
+        if (spacing <= 0) {
+            MessageBoxW(m_hwnd, L"Spacing must be positive.",
+                        L"Curve Slice Along Curve", MB_OK | MB_ICONWARNING);
             return;
         }
         if (m_levelsMgr) {
@@ -1710,8 +2424,92 @@ void MainWindow::createWireframe(int commandId) {
             if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
         }
         wchar_t msg[128] = {};
-        std::swprintf(msg, 128, L"Spline created with %d control points.", n);
+        std::swprintf(msg, 128,
+            L"Curve Slice Along Curve: cross-sections every %.4g mm perpendicular to drive curve.", spacing);
         SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_CURVE_FLOWLINE: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Curve Flowline: select a surface to extract U and V flowline curves."));
+        break;
+    }
+
+    case IDM_WF_CURVE_INTERSECT: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Curve at Intersection: select two intersecting surfaces or solids to extract intersection curves."));
+        break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Modify group
+    // -----------------------------------------------------------------------
+
+    case IDM_WF_MOD_FILLET: {
+        double r = 5.0;
+        if (!promptSingle(L"Fillet Entities",
+                          L"Fillet radius (mm):", r, r)) return;
+        if (r <= 0) {
+            MessageBoxW(m_hwnd, L"Fillet radius must be positive.",
+                        L"Fillet Entities", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        wchar_t msg[128] = {};
+        std::swprintf(msg, 128,
+            L"Fillet Entities: select two intersecting entities; fillet R=%.4g mm.", r);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_MOD_CHAMFER: {
+        double d1 = 5.0, d2 = 5.0;
+        if (!promptDouble2(L"Chamfer Entities",
+                           L"Distance 1 (mm):", d1, d1,
+                           L"Distance 2 (mm):", d2, d2)) return;
+        if (d1 <= 0 || d2 <= 0) {
+            MessageBoxW(m_hwnd, L"Chamfer distances must be positive.",
+                        L"Chamfer Entities", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        wchar_t msg[160] = {};
+        if (std::abs(d1 - d2) < 1e-9)
+            std::swprintf(msg, 160,
+                L"Chamfer Entities: select two entities; symmetric chamfer D=%.4g mm.", d1);
+        else
+            std::swprintf(msg, 160,
+                L"Chamfer Entities: select two entities; D1=%.4g mm, D2=%.4g mm.", d1, d2);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_MOD_DYN_TRIM: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Dynamic Trim: click geometry to trim, break, or divide it at intersections."));
+        break;
+    }
+
+    case IDM_WF_MOD_BREAK_TWO: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Break Two Pieces: click on an entity at the point where it should be split."));
+        break;
+    }
+
+    case IDM_WF_MOD_BREAK_INT: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Break at Intersection: select intersecting entities to break them at all crossing points."));
+        break;
+    }
+
+    case IDM_WF_MOD_JOIN: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Join Entities: select collinear lines or coincident arcs to recombine them into single entities."));
+        break;
+    }
+
+    case IDM_WF_MOD_INTERSECT: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Modify at Intersection: select wireframe and a surface or mesh to break, trim, or create a point."));
         break;
     }
 

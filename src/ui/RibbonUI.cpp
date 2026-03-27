@@ -80,21 +80,87 @@ void RibbonUI::buildHomeTab() {
 void RibbonUI::buildWireframeTab() {
     RibbonTab tab;
     tab.name = "Wireframe";
-    RibbonGroup draw{"Draw", {
-        {IDM_WF_POINT,     "Point (P)",     "Create a point [P]"},
-        {IDM_WF_LINE,      "Line (L)",      "Create a line segment [L]"},
-        {IDM_WF_ARC,       "Arc (A)",       "Create an arc (3-point) [A]"},
-        {IDM_WF_CIRCLE,    "Circle (C)",    "Create a circle [C]"},
-        {IDM_WF_RECTANGLE, "Rectangle",     "Create a rectangle"},
-        {IDM_WF_POLYGON,   "Polygon",       "Create a regular polygon"},
-        {IDM_WF_SPLINE,    "Spline",        "Create a NURBS spline"}
+
+    // Points group
+    RibbonGroup points{"Points", {
+        {IDM_WF_POINT,          "Point Pos",    "Create a point at exact coordinates [P]"},
+        {IDM_WF_POINT_DYNAMIC,  "Point Dyn",    "Create a point dynamically along a curve, surface, or mesh"},
+        {IDM_WF_POINT_NODE,     "Point Node",   "Place points at spline control node locations"},
+        {IDM_WF_POINT_SEGMENT,  "Point Seg",    "Create evenly spaced points along a selected entity"}
     }};
+
+    // Lines group
+    RibbonGroup lines{"Lines", {
+        {IDM_WF_LINE,           "Line Endpts",  "Create a line between two endpoints [L]"},
+        {IDM_WF_LINE_CLOSEST,   "Line Closest", "Create the shortest line between two selected entities"},
+        {IDM_WF_LINE_BISECT,    "Line Bisect",  "Create a line bisecting the angle between two lines"},
+        {IDM_WF_LINE_PERP,      "Line Perp",    "Create a line perpendicular to a selected entity"},
+        {IDM_WF_LINE_PARALLEL,  "Line Para",    "Create a line parallel to an existing line at an offset"},
+        {IDM_WF_LINE_NORMAL,    "Line Normal",  "Create normal lines to a point, grid, or along a chain"}
+    }};
+
+    // Arcs group
+    RibbonGroup arcs{"Arcs", {
+        {IDM_WF_CIRCLE,         "Circle Ctr",   "Create a circle from centre point and radius [C]"},
+        {IDM_WF_CIRCLE_EDGE,    "Circle Edge",  "Create a circle through 2 or 3 circumference points"},
+        {IDM_WF_ARC,            "Arc 3 Pts",    "Create an arc passing through three specified points [A]"},
+        {IDM_WF_ARC_TANGENT,    "Arc Tangent",  "Create an arc tangent to 1, 2, or 3 existing entities"},
+        {IDM_WF_ARC_ENDPOINTS,  "Arc Endpts",   "Create an arc from two endpoints and a radius"},
+        {IDM_WF_ARC_POLAR,      "Arc Polar",    "Create an arc using centre, radius, and start/end angles"}
+    }};
+
+    // Splines group
+    RibbonGroup splines{"Splines", {
+        {IDM_WF_SPLINE,         "Spline Man",   "Create a spline by placing control points manually"},
+        {IDM_WF_SPLINE_AUTO,    "Spline Auto",  "Auto-fit a smooth spline through selected points"},
+        {IDM_WF_SPLINE_BLENDED, "Spline Blend", "Create a smooth blended spline connecting two curves"}
+    }};
+
+    // Shapes group
+    RibbonGroup shapes{"Shapes", {
+        {IDM_WF_RECTANGLE,      "Rectangle",    "Create a rectangle from corners or centre point"},
+        {IDM_WF_RECT_SHAPES,    "Rect Shapes",  "Create a rectangular profile with fillets or chamfers"},
+        {IDM_WF_POLYGON,        "Polygon",      "Create a regular polygon (hexagon, octagon, etc.)"},
+        {IDM_WF_ELLIPSE,        "Ellipse",      "Create an ellipse from centre and major/minor axes"},
+        {IDM_WF_HELIX,          "Spiral/Helix", "Create a 2D spiral or 3D helix"},
+        {IDM_WF_BBOX,           "Bounding Box", "Generate a 2D/3D bounding box around selected geometry"}
+    }};
+
+    // Curves (extraction) group
+    RibbonGroup curves{"Curves", {
+        {IDM_WF_CURVE_ONE_EDGE,  "Curve 1 Edge", "Extract wireframe from a single solid/surface edge"},
+        {IDM_WF_CURVE_ALL_EDGES, "Curve All",    "Extract wireframe from all edges of a solid or surface"},
+        {IDM_WF_CURVE_SLICE_PLN, "Slice/Plane",  "Create wireframe cross-sections by slicing with a plane"},
+        {IDM_WF_CURVE_SLICE_CRV, "Slice/Curve",  "Create cross-sections perpendicular to a drive curve"},
+        {IDM_WF_CURVE_FLOWLINE,  "Flowline",     "Create curves along the U and V flowlines of a surface"},
+        {IDM_WF_CURVE_INTERSECT, "At Intersect", "Generate curves where two surfaces or solids intersect"}
+    }};
+
+    // Modify group
+    RibbonGroup modify{"Modify", {
+        {IDM_WF_MOD_FILLET,    "Fillet",      "Apply a rounded radius between two intersecting entities"},
+        {IDM_WF_MOD_CHAMFER,   "Chamfer",     "Apply a flat angled break between two intersecting entities"},
+        {IDM_WF_MOD_DYN_TRIM,  "Dyn Trim",   "Trim, divide, or lengthen entities dynamically"},
+        {IDM_WF_MOD_BREAK_TWO, "Break 2",    "Split an entity into two pieces at a click point"},
+        {IDM_WF_MOD_BREAK_INT, "Break Int",  "Break intersecting entities at their crossing points"},
+        {IDM_WF_MOD_JOIN,      "Join",        "Recombine collinear lines or coincident arcs"},
+        {IDM_WF_MOD_INTERSECT, "Mod Intersect", "Break, trim, or create a point at wireframe/surface intersections"}
+    }};
+
+    // Transform group
     RibbonGroup xform{"Transform", {
-        {IDM_GEOM_MOVE,    "Move (M)",      "Move selected geometry [M]"},
-        {IDM_GEOM_ROTATE,  "Rotate (R)",    "Rotate selected geometry [R]"},
-        {IDM_GEOM_SCALE,   "Scale (S)",     "Scale selected geometry [S]"}
+        {IDM_GEOM_MOVE,    "Move (M)",   "Move selected geometry [M]"},
+        {IDM_GEOM_ROTATE,  "Rotate (R)", "Rotate selected geometry [R]"},
+        {IDM_GEOM_SCALE,   "Scale (S)",  "Scale selected geometry [S]"}
     }};
-    tab.groups.push_back(draw);
+
+    tab.groups.push_back(points);
+    tab.groups.push_back(lines);
+    tab.groups.push_back(arcs);
+    tab.groups.push_back(splines);
+    tab.groups.push_back(shapes);
+    tab.groups.push_back(curves);
+    tab.groups.push_back(modify);
     tab.groups.push_back(xform);
     addTab(tab);
 }
@@ -121,23 +187,53 @@ void RibbonUI::buildSurfacesTab() {
 void RibbonUI::buildSolidsTab() {
     RibbonTab tab;
     tab.name = "Solids";
+
+    // Create group – history-based operations from wireframe chains
     RibbonGroup create{"Create", {
-        {IDM_SOLID_EXTRUDE,  "Extrude",   "Extrude a profile into a solid (Box)"},
-        {IDM_SOLID_REVOLVE,  "Revolve",   "Revolve a profile into a solid (Cylinder)"},
-        {IDM_SOLID_SPHERE,   "Sphere",    "Create a parametric sphere"}
+        {IDM_SOLID_EXTRUDE,  "Extrude",   "Push a 2D profile along a linear path (Add Boss, Cut Body, or New)"},
+        {IDM_SOLID_REVOLVE,  "Revolve",   "Rotate a 2D profile around an axis to create cylindrical shapes"},
+        {IDM_SOLID_SWEEP,    "Sweep",     "Move a profile along a path curve to create complex tubular shapes"},
+        {IDM_SOLID_LOFT,     "Loft",      "Blend multiple cross-section ribs into a smooth organic solid"},
+        {IDM_SOLID_THICKEN,  "Thicken",   "Add thickness to an existing surface to produce a solid body"}
     }};
-    RibbonGroup boolean_{"Boolean", {
-        {IDM_SOLID_UNION,    "Union",     "Boolean union of two solids"},
-        {IDM_SOLID_SUBTRACT, "Subtract",  "Boolean subtract from a solid"},
-        {IDM_SOLID_INTERSECT,"Intersect", "Boolean intersection of two solids"}
+
+    // Primitives group – drop standard shapes without needing wireframe
+    RibbonGroup prims{"Primitives", {
+        {IDM_SOLID_BLOCK,    "Block",     "Create a rectangular solid from dimensions or two corner points"},
+        {IDM_SOLID_CYLINDER, "Cylinder",  "Create a cylindrical solid with a defined radius and height"},
+        {IDM_SOLID_SPHERE,   "Sphere",    "Create a solid ball from a centre point and radius"},
+        {IDM_SOLID_CONE,     "Cone",      "Create a tapered conical solid"},
+        {IDM_SOLID_TORUS,    "Torus",     "Create a donut-shaped solid from a major and minor radius"}
     }};
+
+    // Modify group – refine features on an existing solid
     RibbonGroup modify{"Modify", {
-        {IDM_SOLID_FILLET,   "Fillet",    "Add a fillet edge to a solid"},
-        {IDM_SOLID_SHELL,    "Shell",     "Shell/hollow a solid body"}
+        {IDM_SOLID_FILLET,   "Fillet",    "Round off sharp edges with a constant or variable radius"},
+        {IDM_SOLID_CHAMFER,  "Chamfer",   "Apply a flat angled break to edges (symmetrical or asymmetrical)"},
+        {IDM_SOLID_SHELL,    "Shell",     "Hollow out a solid to a specified wall thickness"},
+        {IDM_SOLID_DRAFT,    "Draft",     "Taper vertical faces for moulding or casting pull"},
+        {IDM_SOLID_TRIM,     "Trim",      "Cut a solid body using a plane, surface, or another solid"}
     }};
+
+    // Boolean group – combine or subtract solid bodies
+    RibbonGroup boolean_{"Boolean", {
+        {IDM_SOLID_UNION,    "Add",       "Merge two or more solid bodies into a single entity"},
+        {IDM_SOLID_SUBTRACT, "Remove",    "Use one solid to cut a shape out of another"},
+        {IDM_SOLID_INTERSECT,"Common",    "Keep only the volume where two solids overlap"}
+    }};
+
+    // Advanced / Specialized group
+    RibbonGroup advanced{"Advanced", {
+        {IDM_SOLID_HOLE,     "Hole",      "Create complex holes: simple, counterbore, countersink, taper, or threaded"},
+        {IDM_SOLID_IMPRESS,  "Impression","Generate the negative of a solid (useful for molds and electrodes)"},
+        {IDM_SOLID_FROM_SURF,"From Surfs","Convert a collection of closed surfaces into a watertight solid body"}
+    }};
+
     tab.groups.push_back(create);
-    tab.groups.push_back(boolean_);
+    tab.groups.push_back(prims);
     tab.groups.push_back(modify);
+    tab.groups.push_back(boolean_);
+    tab.groups.push_back(advanced);
     addTab(tab);
 }
 
