@@ -68,14 +68,57 @@ constexpr int IDM_VIEW_ZOOM_SELECTED   = 3012;  // F2 – Zoom to selected entit
 constexpr int IDM_VIEW_TOGGLE_GRID     = 3013;  // F4 – Toggle grid display
 constexpr int IDM_VIEW_TOGGLE_GNOMON   = 3014;  // F5 – Toggle dynamic gnomon
 
-// Wireframe tab commands
-constexpr int IDM_WF_POINT        = 4001;
-constexpr int IDM_WF_LINE         = 4002;
-constexpr int IDM_WF_ARC          = 4003;
-constexpr int IDM_WF_SPLINE       = 4004;
-constexpr int IDM_WF_CIRCLE       = 4005;
-constexpr int IDM_WF_RECTANGLE    = 4006;
-constexpr int IDM_WF_POLYGON      = 4007;
+// Wireframe tab commands – Points group
+constexpr int IDM_WF_POINT           = 4001;  // Point Position (coordinates) [P]
+constexpr int IDM_WF_POINT_DYNAMIC   = 4008;  // Point Dynamic (along curve/surface/mesh)
+constexpr int IDM_WF_POINT_NODE      = 4009;  // Point Node Points (spline control nodes)
+constexpr int IDM_WF_POINT_SEGMENT   = 4010;  // Point Segment (evenly spaced points)
+
+// Wireframe tab commands – Lines group
+constexpr int IDM_WF_LINE            = 4002;  // Line Endpoints [L]
+constexpr int IDM_WF_LINE_CLOSEST    = 4011;  // Line Closest (shortest between two entities)
+constexpr int IDM_WF_LINE_BISECT     = 4012;  // Line Bisect (bisects angle between two lines)
+constexpr int IDM_WF_LINE_PERP       = 4013;  // Line Perpendicular
+constexpr int IDM_WF_LINE_PARALLEL   = 4014;  // Line Parallel (offset distance)
+constexpr int IDM_WF_LINE_NORMAL     = 4015;  // Line Normal (to point/grid/chain)
+
+// Wireframe tab commands – Arcs group
+constexpr int IDM_WF_ARC             = 4003;  // Arc 3 Points [A]
+constexpr int IDM_WF_CIRCLE          = 4005;  // Circle Center Point [C]
+constexpr int IDM_WF_CIRCLE_EDGE     = 4016;  // Circle Edge Points (2- or 3-point)
+constexpr int IDM_WF_ARC_TANGENT     = 4017;  // Arc Tangent (1/2/3 entities)
+constexpr int IDM_WF_ARC_ENDPOINTS   = 4018;  // Arc Endpoints (two pts + radius)
+constexpr int IDM_WF_ARC_POLAR       = 4019;  // Arc Polar (centre + radius + angles)
+
+// Wireframe tab commands – Splines group
+constexpr int IDM_WF_SPLINE          = 4004;  // Spline Manual
+constexpr int IDM_WF_SPLINE_AUTO     = 4020;  // Spline Automatic (fit through points)
+constexpr int IDM_WF_SPLINE_BLENDED  = 4021;  // Spline Blended (connect two curves)
+
+// Wireframe tab commands – Shapes group
+constexpr int IDM_WF_RECTANGLE       = 4006;  // Rectangle
+constexpr int IDM_WF_RECT_SHAPES     = 4022;  // Rectangular Shapes (rounded corners / chamfers)
+constexpr int IDM_WF_POLYGON         = 4007;  // Polygon
+constexpr int IDM_WF_ELLIPSE         = 4023;  // Ellipse (centre + major/minor axes)
+constexpr int IDM_WF_HELIX           = 4024;  // Spiral / Helix
+constexpr int IDM_WF_BBOX            = 4025;  // Bounding Box (2D/3D)
+
+// Wireframe tab commands – Curves (extraction) group
+constexpr int IDM_WF_CURVE_ONE_EDGE  = 4026;  // Curve One Edge (from solid/surface edge)
+constexpr int IDM_WF_CURVE_ALL_EDGES = 4027;  // Curve All Edges
+constexpr int IDM_WF_CURVE_SLICE_PLN = 4028;  // Curve Slice by Plane
+constexpr int IDM_WF_CURVE_SLICE_CRV = 4029;  // Curve Slice Along Curve
+constexpr int IDM_WF_CURVE_FLOWLINE  = 4030;  // Curve Flowline (U/V)
+constexpr int IDM_WF_CURVE_INTERSECT = 4031;  // Curve at Intersection
+
+// Wireframe tab commands – Modify group
+constexpr int IDM_WF_MOD_FILLET      = 4032;  // Fillet Entities
+constexpr int IDM_WF_MOD_CHAMFER     = 4033;  // Chamfer Entities
+constexpr int IDM_WF_MOD_DYN_TRIM    = 4034;  // Dynamic Trim
+constexpr int IDM_WF_MOD_BREAK_TWO   = 4035;  // Break Two Pieces
+constexpr int IDM_WF_MOD_BREAK_INT   = 4036;  // Break at Intersection
+constexpr int IDM_WF_MOD_JOIN        = 4037;  // Join Entities
+constexpr int IDM_WF_MOD_INTERSECT   = 4038;  // Modify at Intersection
 
 // Surfaces tab commands
 constexpr int IDM_SURF_LOFT       = 4101;
