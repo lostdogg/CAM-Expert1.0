@@ -5,6 +5,7 @@
 #include "Geometry.h"
 #include <vector>
 #include <cmath>
+#include <functional>
 
 // -------------------------------------------------------------------------
 // Construction Plane (Cplane) – defines the "paper" you draw on.
@@ -115,10 +116,16 @@ public:
     // the current Cplane orientation and Z-depth offset.
     Geom::Vec3 toWorld(double x, double y) const;
 
+    // Change notification – called after addEntity() with the new entity's
+    // zero-based index, and after clear() with index == -1.
+    using EntityChangeCallback = std::function<void(int entityIndex)>;
+    void setOnEntityChanged(EntityChangeCallback cb) { m_onEntityChanged = std::move(cb); }
+
 private:
-    std::vector<WfEntity> m_entities;
-    CplaneType            m_cplane = CplaneType::Top;
-    double                m_zDepth = 0.0;
+    std::vector<WfEntity>  m_entities;
+    CplaneType             m_cplane = CplaneType::Top;
+    double                 m_zDepth = 0.0;
+    EntityChangeCallback   m_onEntityChanged;
 };
 
 // -------------------------------------------------------------------------
