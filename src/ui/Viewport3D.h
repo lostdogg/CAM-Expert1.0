@@ -4,6 +4,7 @@
 
 #include <windows.h>
 #include "../cad/Geometry.h"
+#include "../cad/WireframeScene.h"
 #include "../cam/Toolpath.h"
 #include <vector>
 
@@ -11,6 +12,7 @@
 class ToolpathManager;
 class SolidsManager;
 class SurfacesManager;
+// WireframeScene is fully included above via WireframeScene.h
 
 // --------------------------------------------------------------------------
 // Viewport3D
@@ -56,6 +58,12 @@ public:
     // The pointer is non-owning; caller is responsible for lifetime.
     void setSurfacesManager(const SurfacesManager* mgr);
 
+    // Provide the wireframe scene so the viewport can render all WfEntity
+    // objects (lines, arcs, circles, splines, polygons, etc.) and show
+    // AutoCursor snap highlights on hover.
+    // The pointer is non-owning; caller is responsible for lifetime.
+    void setWireframeScene(const WireframeScene* scene);
+
     RenderMode renderMode() const { return m_renderMode; }
     bool       gridVisible()   const { return m_showGrid; }
     bool       gnomonVisible() const { return m_showGnomon; }
@@ -75,6 +83,7 @@ private:
     void drawSolids();     // render BRep solid bodies from SolidsManager
     void drawSurfaces();   // render NURBS surfaces from SurfacesManager
     void drawToolpaths();
+    void drawWireframe();  // render all wireframe entities from WireframeScene
 
     // Returns an RGB colour triple for a given motion type
     static void motionColor(MotionType mt, float& r, float& g, float& b);
@@ -111,6 +120,7 @@ private:
     const ToolpathManager* m_toolpathMgr = nullptr;  // non-owning
     const SolidsManager*   m_solidsMgr   = nullptr;  // non-owning
     const SurfacesManager* m_surfacesMgr = nullptr;  // non-owning
+    const WireframeScene*  m_wfScene     = nullptr;  // non-owning
 
     static constexpr const wchar_t* CLASS_NAME = L"CAMExpertViewport";
 };

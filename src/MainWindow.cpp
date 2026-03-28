@@ -275,6 +275,8 @@ LRESULT MainWindow::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             case VK_F5:     onCommand(IDM_VIEW_TOGGLE_GNOMON);  return 0;
             case VK_F6:     onCommand(IDM_MACHINE_3D_WATERLINE); return 0;
             case VK_F7:     onCommand(IDM_MACHINE_3D_SCALLOP);  return 0;
+            case VK_F8:     onCommand(IDM_WF_SET_CPLANE);       return 0;
+            case VK_F9:     onCommand(IDM_WF_SET_ZDEPTH);       return 0;
             case 'T':       onCommand(IDM_TOOLPATH_MGR_TOGGLE); return 0;
             case 'M':       onCommand(IDM_GEOM_MOVE);           return 0;
             case 'R':       onCommand(IDM_GEOM_ROTATE);         return 0;
@@ -398,6 +400,10 @@ void MainWindow::onCreate() {
     m_copilotPanel = std::make_unique<CopilotPanel>(m_hwnd, hInst);
     m_copilotPanel->setCopilotEngine(m_copilotEngine.get());
     ShowWindow(m_copilotPanel->hwnd(), SW_HIDE);  // hidden by default
+
+    // --- Wireframe scene (entity store, Cplane, Z-depth) ---
+    m_wfScene = std::make_unique<WireframeScene>();
+    if (m_viewport) m_viewport->setWireframeScene(m_wfScene.get());
 }
 
 // --------------------------------------------------------------------------
@@ -497,6 +503,9 @@ void MainWindow::buildMenu() {
     AppendMenuW(hGeom, MF_STRING, IDM_WF_CIRCLE,  L"&Circle\tC");
     AppendMenuW(hGeom, MF_STRING, IDM_WF_POINT,   L"&Point\tP");
     AppendMenuW(hGeom, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hGeom, MF_STRING, IDM_WF_SET_CPLANE, L"Cycle &Construction Plane\tF8");
+    AppendMenuW(hGeom, MF_STRING, IDM_WF_SET_ZDEPTH, L"Set &Z-Depth…\tF9");
+    AppendMenuW(hGeom, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hGeom, MF_STRING, IDM_GEOM_MOVE,   L"&Move\tM");
     AppendMenuW(hGeom, MF_STRING, IDM_GEOM_ROTATE, L"&Rotate\tR");
     AppendMenuW(hGeom, MF_STRING, IDM_GEOM_SCALE,  L"&Scale\tS");
@@ -543,6 +552,8 @@ void MainWindow::buildAcceleratorTable() {
         { FVIRTKEY | FCONTROL,               'P',      IDM_MACHINE_POST },
         { FVIRTKEY,                          VK_F6,    IDM_MACHINE_3D_WATERLINE },
         { FVIRTKEY,                          VK_F7,    IDM_MACHINE_3D_SCALLOP   },
+        { FVIRTKEY,                          VK_F8,    IDM_WF_SET_CPLANE        },
+        { FVIRTKEY,                          VK_F9,    IDM_WF_SET_ZDEPTH        },
         // View / Function keys
         { FVIRTKEY,                          VK_F1,    IDM_HELP_TOPICS         },
         { FVIRTKEY,                          VK_F2,    IDM_VIEW_ZOOM_SELECTED  },
@@ -567,9 +578,23 @@ void MainWindow::onSize(int cx, int cy) {
 void MainWindow::updateLayout(int cx, int cy) {
     if (!m_hwnd) return;
 
-    // Status bar – auto-sizes itself
-    if (m_hStatusBar)
+    // Status bar – auto-sizes itself, then we partition it into 4 panes.
+    if (m_hStatusBar) {
         SendMessage(m_hStatusBar, WM_SIZE, 0, 0);
+        // Fixed-width panes at the right end; pane 0 fills the remainder.
+        int snapW   = 100;
+        int zdepW   = 110;
+        int cplaneW = 90;
+        int parts[4] = {
+            cx - cplaneW - zdepW - snapW,   // pane 0: message
+            cx - zdepW   - snapW,           // pane 1: Cplane
+            cx - snapW,                     // pane 2: Z-depth
+            -1                              // pane 3: Snap (fills to end)
+        };
+        SendMessage(m_hStatusBar, SB_SETPARTS, 4,
+                    reinterpret_cast<LPARAM>(parts));
+        updateWfStatusBar();
+    }
 
     int viewY  = RIBBON_HEIGHT;
     int viewH  = cy - RIBBON_HEIGHT - STATUS_BAR_HEIGHT;
@@ -706,8 +731,14 @@ void MainWindow::onCommand(int id) {
     case IDM_WF_MOD_BREAK_INT:
     case IDM_WF_MOD_JOIN:
     case IDM_WF_MOD_INTERSECT:
+    case IDM_WF_MOD_PROJECT:
+    case IDM_WF_MOD_OFFSET:
+    case IDM_WF_MOD_ROLL:
         createWireframe(id);
         break;
+
+    case IDM_WF_SET_CPLANE: wfCycleCplane(); break;
+    case IDM_WF_SET_ZDEPTH: wfSetZDepth();  break;
 
     case IDM_SURF_LOFT:    surfaceLoft();    break;
     case IDM_SURF_REVOLVE: surfaceRevolve(); break;
@@ -1912,8 +1943,27 @@ void MainWindow::solidFromSurfaces() {
 
 // --------------------------------------------------------------------------
 void MainWindow::createWireframe(int commandId) {
-    // Each wireframe command prompts for key parameters, creates a named
-    // geometry entry, and adds it to a Level so feature recognition can use it.
+    // Each wireframe command prompts for key parameters, creates a WfEntity
+    // in the scene, updates the LevelsManager, and redraws the viewport.
+
+    // Bump the entity count in the default level.
+    auto bumpLevel = [this](int n = 1) {
+        if (m_levelsMgr) {
+            Level* lv = m_levelsMgr->findLevel(1);
+            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + n);
+        }
+    };
+
+    // Add entity to scene and refresh UI.
+    auto commit = [this](WfEntity e) {
+        if (m_wfScene) m_wfScene->addEntity(std::move(e));
+        if (m_viewport) m_viewport->redraw();
+        updateWfStatusBar();
+    };
+
+    static constexpr double kTwoPi    = 6.28318530717959;
+    static constexpr double kDegToRad = 0.01745329251994;
+
     switch (commandId) {
 
     // -----------------------------------------------------------------------
@@ -1926,39 +1976,37 @@ void MainWindow::createWireframe(int commandId) {
                           L"X (mm):", x, x,
                           L"Y (mm):", y, y,
                           L"Z (mm):", z, z)) return;
-        // Add a named entry to the default level
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) {
-                lv->entityCount++;
-                m_levelsMgr->setEntityCount(1, lv->entityCount);
-            }
-        }
+        bumpLevel();
+        WfEntity e;
+        e.type = WfEntityType::Point;
+        e.p0   = { x, y, z };
+        commit(std::move(e));
         wchar_t msg[128] = {};
         std::swprintf(msg, 128, L"Point created at (%.4g, %.4g, %.4g)", x, y, z);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_POINT_DYNAMIC: {
         double distPct = 50.0;
         if (!promptSingle(L"Point Dynamic",
-                          L"Position along entity (% of length, 0–100):",
+                          L"Position along entity (% of length, 0-100):",
                           distPct, distPct)) return;
         if (distPct < 0) distPct = 0;
         if (distPct > 100) distPct = 100;
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
-        }
+        bumpLevel();
+        WfEntity e;
+        e.type  = WfEntityType::Point;
+        e.count = static_cast<int>(distPct);
+        commit(std::move(e));
         wchar_t msg[160] = {};
         std::swprintf(msg, 160, L"Dynamic point placed at %.4g%% along selected entity.", distPct);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_POINT_NODE: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Point Node: select a spline to place points at its control nodes."));
         break;
     }
@@ -1973,13 +2021,14 @@ void MainWindow::createWireframe(int commandId) {
                         L"Point Segment", MB_OK | MB_ICONWARNING);
             return;
         }
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + n);
-        }
+        bumpLevel(n);
+        WfEntity e;
+        e.type  = WfEntityType::Point;
+        e.count = n;
+        commit(std::move(e));
         wchar_t msg[128] = {};
         std::swprintf(msg, 128, L"Point Segment: %d equally spaced points created along entity.", n);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
@@ -1988,34 +2037,35 @@ void MainWindow::createWireframe(int commandId) {
     // -----------------------------------------------------------------------
 
     case IDM_WF_LINE: {
-        double x1 = 0, y1 = 0, z1 = 0;
-        double x2 = 100, y2 = 0, z2 = 0;
-        if (!promptDouble2(L"Create Line – Start Point",
+        double x1 = 0, y1 = 0, x2 = 100, y2 = 0;
+        if (!promptDouble2(L"Create Line - Start Point",
                            L"X (mm):", x1, x1,
                            L"Y (mm):", y1, y1)) return;
-        if (!promptDouble2(L"Create Line – End Point",
+        if (!promptDouble2(L"Create Line - End Point",
                            L"X (mm):", x2, x2,
                            L"Y (mm):", y2, y2)) return;
-        double len = std::sqrt((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1) + (z2-z1)*(z2-z1));
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
-        }
+        bumpLevel();
+        WfEntity e;
+        e.type = WfEntityType::Line;
+        e.p0   = m_wfScene ? m_wfScene->toWorld(x1, y1) : Geom::Vec3{x1, y1, 0};
+        e.p1   = m_wfScene ? m_wfScene->toWorld(x2, y2) : Geom::Vec3{x2, y2, 0};
+        double len = (e.p1 - e.p0).length();
+        commit(std::move(e));
         wchar_t msg[160] = {};
         std::swprintf(msg, 160, L"Line created: (%.4g,%.4g)→(%.4g,%.4g), len=%.4g mm",
                       x1, y1, x2, y2, len);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_LINE_CLOSEST: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Line Closest: select two entities to connect with the shortest possible line."));
         break;
     }
 
     case IDM_WF_LINE_BISECT: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Line Bisect: select two intersecting lines to create an angle bisector."));
         break;
     }
@@ -2029,13 +2079,10 @@ void MainWindow::createWireframe(int commandId) {
                         L"Line Perpendicular", MB_OK | MB_ICONWARNING);
             return;
         }
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
-        }
+        bumpLevel();
         wchar_t msg[128] = {};
         std::swprintf(msg, 128, L"Line Perpendicular: select entity; line length = %.4g mm.", len);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
@@ -2048,18 +2095,15 @@ void MainWindow::createWireframe(int commandId) {
                         L"Line Parallel", MB_OK | MB_ICONWARNING);
             return;
         }
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
-        }
+        bumpLevel();
         wchar_t msg[128] = {};
         std::swprintf(msg, 128, L"Line Parallel: select source line; offset = %.4g mm.", offset);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_LINE_NORMAL: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Line Normal: select a point, grid, or chain to create normal lines."));
         break;
     }
@@ -2078,19 +2122,23 @@ void MainWindow::createWireframe(int commandId) {
             MessageBoxW(m_hwnd, L"Radius must be positive.", L"Create Circle", MB_OK | MB_ICONWARNING);
             return;
         }
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
-        }
+        bumpLevel();
+        WfEntity e;
+        e.type       = WfEntityType::Circle;
+        e.p0         = m_wfScene ? m_wfScene->toWorld(cx, cy) : Geom::Vec3{cx, cy, 0};
+        e.radius     = r;
+        e.startAngle = 0.0;
+        e.endAngle   = kTwoPi;
+        commit(std::move(e));
         wchar_t msg[160] = {};
         std::swprintf(msg, 160, L"Circle created: centre=(%.4g,%.4g), R=%.4g mm, C=%.4g mm",
-                      cx, cy, r, 2.0 * kPi * r);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+                      cx, cy, r, kTwoPi * r);
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_CIRCLE_EDGE: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Circle Edge Points: select 2 or 3 points on the circumference to define the circle."));
         break;
     }
@@ -2102,38 +2150,42 @@ void MainWindow::createWireframe(int commandId) {
                           L"Centre Y (mm):", cy, cy,
                           L"Radius  (mm):", r,  r)) return;
         double startDeg = 0, endDeg = 90;
-        if (!promptDouble2(L"Create Arc – Angles",
-                           L"Start angle (°):", startDeg, startDeg,
-                           L"End angle   (°):", endDeg,   endDeg)) return;
+        if (!promptDouble2(L"Create Arc - Angles",
+                           L"Start angle (deg):", startDeg, startDeg,
+                           L"End angle   (deg):", endDeg,   endDeg)) return;
         if (r <= 0) {
             MessageBoxW(m_hwnd, L"Radius must be positive.", L"Create Arc", MB_OK | MB_ICONWARNING);
             return;
         }
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
-        }
+        bumpLevel();
+        WfEntity e;
+        e.type       = WfEntityType::Arc;
+        e.p0         = m_wfScene ? m_wfScene->toWorld(cx, cy) : Geom::Vec3{cx, cy, 0};
+        e.radius     = r;
+        e.startAngle = startDeg * kDegToRad;
+        e.endAngle   = endDeg   * kDegToRad;
+        commit(std::move(e));
         wchar_t msg[160] = {};
-        std::swprintf(msg, 160, L"Arc created: R=%.4g mm, %.4g°→%.4g°", r, startDeg, endDeg);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        std::swprintf(msg, 160, L"Arc created: R=%.4g mm, %.4g deg->%.4g deg", r, startDeg, endDeg);
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_ARC_TANGENT: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Arc Tangent: select 1, 2, or 3 existing entities to create a tangent arc."));
         break;
     }
 
     case IDM_WF_ARC_ENDPOINTS: {
         double x1 = 0, y1 = 0, x2 = 50, y2 = 0, r = 30.0;
-        if (!promptDouble2(L"Arc Endpoints – Start Point",
+        if (!promptDouble2(L"Arc Endpoints - Start Point",
                            L"X (mm):", x1, x1,
                            L"Y (mm):", y1, y1)) return;
-        if (!promptDouble2(L"Arc Endpoints – End Point",
+        if (!promptDouble2(L"Arc Endpoints - End Point",
                            L"X (mm):", x2, x2,
                            L"Y (mm):", y2, y2)) return;
-        if (!promptSingle(L"Arc Endpoints – Radius",
+        if (!promptSingle(L"Arc Endpoints - Radius",
                           L"Radius (mm):", r, r)) return;
         if (r <= 0) {
             MessageBoxW(m_hwnd, L"Radius must be positive.", L"Arc Endpoints", MB_OK | MB_ICONWARNING);
@@ -2145,42 +2197,55 @@ void MainWindow::createWireframe(int commandId) {
                         L"Arc Endpoints", MB_OK | MB_ICONWARNING);
             return;
         }
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
-        }
+        bumpLevel();
+        // Compute arc centre from endpoints + radius (first solution).
+        double mx = (x1 + x2) / 2.0, my = (y1 + y2) / 2.0;
+        double h  = std::sqrt(std::max(0.0, r * r - chord * chord / 4.0));
+        double dx = (y2 - y1) / chord, dy = -(x2 - x1) / chord;
+        double cxv = mx + h * dx, cyv = my + h * dy;
+        WfEntity e;
+        e.type       = WfEntityType::Arc;
+        e.p0         = m_wfScene ? m_wfScene->toWorld(cxv, cyv) : Geom::Vec3{cxv, cyv, 0};
+        e.radius     = r;
+        e.startAngle = std::atan2(y1 - cyv, x1 - cxv);
+        e.endAngle   = std::atan2(y2 - cyv, x2 - cxv);
+        commit(std::move(e));
         wchar_t msg[192] = {};
         std::swprintf(msg, 192,
-            L"Arc Endpoints: (%.4g,%.4g)→(%.4g,%.4g), R=%.4g mm, chord=%.4g mm",
+            L"Arc Endpoints: (%.4g,%.4g)->(%.4g,%.4g), R=%.4g mm, chord=%.4g mm",
             x1, y1, x2, y2, r, chord);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_ARC_POLAR: {
         double cx = 0, cy = 0, r = 25.0;
-        if (!promptTriple(L"Arc Polar – Centre & Radius",
+        if (!promptTriple(L"Arc Polar - Centre & Radius",
                           L"Centre X (mm):", cx, cx,
                           L"Centre Y (mm):", cy, cy,
                           L"Radius  (mm):", r,  r)) return;
         double startDeg = 0, endDeg = 90;
-        if (!promptDouble2(L"Arc Polar – Start / End Angles",
-                           L"Start angle (°):", startDeg, startDeg,
-                           L"End angle   (°):", endDeg,   endDeg)) return;
+        if (!promptDouble2(L"Arc Polar - Start / End Angles",
+                           L"Start angle (deg):", startDeg, startDeg,
+                           L"End angle   (deg):", endDeg,   endDeg)) return;
         if (r <= 0) {
             MessageBoxW(m_hwnd, L"Radius must be positive.", L"Arc Polar", MB_OK | MB_ICONWARNING);
             return;
         }
         double sweep = endDeg - startDeg;
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
-        }
+        bumpLevel();
+        WfEntity e;
+        e.type       = WfEntityType::Arc;
+        e.p0         = m_wfScene ? m_wfScene->toWorld(cx, cy) : Geom::Vec3{cx, cy, 0};
+        e.radius     = r;
+        e.startAngle = startDeg * kDegToRad;
+        e.endAngle   = endDeg   * kDegToRad;
+        commit(std::move(e));
         wchar_t msg[192] = {};
         std::swprintf(msg, 192,
-            L"Arc Polar: centre=(%.4g,%.4g), R=%.4g mm, %.4g°→%.4g° (sweep %.4g°)",
+            L"Arc Polar: centre=(%.4g,%.4g), R=%.4g mm, %.4g deg->%.4g deg (sweep %.4g deg)",
             cx, cy, r, startDeg, endDeg, sweep);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
@@ -2197,13 +2262,19 @@ void MainWindow::createWireframe(int commandId) {
                         L"Create Spline", MB_OK | MB_ICONWARNING);
             return;
         }
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
+        bumpLevel();
+        WfEntity e;
+        e.type  = WfEntityType::Spline;
+        e.count = n;
+        // Placeholder control points evenly spaced along in-plane X axis.
+        for (int i = 0; i < n; ++i) {
+            double px = static_cast<double>(i) * 25.0;
+            e.pts.push_back(m_wfScene ? m_wfScene->toWorld(px, 0.0) : Geom::Vec3{px, 0, 0});
         }
+        commit(std::move(e));
         wchar_t msg[128] = {};
         std::swprintf(msg, 128, L"Spline created with %d control points.", n);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
@@ -2212,14 +2283,11 @@ void MainWindow::createWireframe(int commandId) {
         if (!promptSingle(L"Spline Automatic",
                           L"Fit tolerance (mm):", tol, tol)) return;
         if (tol <= 0) tol = 0.01;
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
-        }
+        bumpLevel();
         wchar_t msg[128] = {};
         std::swprintf(msg, 128,
             L"Spline Automatic: select points; fit tolerance = %.4g mm.", tol);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
@@ -2228,14 +2296,11 @@ void MainWindow::createWireframe(int commandId) {
         if (!promptSingle(L"Spline Blended",
                           L"Blend tolerance (mm):", tol, tol)) return;
         if (tol <= 0) tol = 0.01;
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
-        }
+        bumpLevel();
         wchar_t msg[128] = {};
         std::swprintf(msg, 128,
             L"Spline Blended: select two curves to connect; tolerance = %.4g mm.", tol);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
@@ -2245,10 +2310,10 @@ void MainWindow::createWireframe(int commandId) {
 
     case IDM_WF_RECTANGLE: {
         double x = 0, y = 0, w = 100, h = 50;
-        if (!promptDouble2(L"Create Rectangle – Origin",
+        if (!promptDouble2(L"Create Rectangle - Origin",
                            L"X (mm):", x, x,
                            L"Y (mm):", y, y)) return;
-        if (!promptDouble2(L"Create Rectangle – Size",
+        if (!promptDouble2(L"Create Rectangle - Size",
                            L"Width  (mm):", w, w,
                            L"Height (mm):", h, h)) return;
         if (w <= 0 || h <= 0) {
@@ -2256,22 +2321,28 @@ void MainWindow::createWireframe(int commandId) {
                         L"Create Rectangle", MB_OK | MB_ICONWARNING);
             return;
         }
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 4); // 4 lines
-        }
+        bumpLevel(4);
+        WfEntity e;
+        e.type  = WfEntityType::Rectangle;
+        e.count = 4;
+        e.p0    = m_wfScene ? m_wfScene->toWorld(x,   y)   : Geom::Vec3{x,   y,   0};
+        e.pts.push_back(e.p0);
+        e.pts.push_back(m_wfScene ? m_wfScene->toWorld(x+w, y)   : Geom::Vec3{x+w, y,   0});
+        e.pts.push_back(m_wfScene ? m_wfScene->toWorld(x+w, y+h) : Geom::Vec3{x+w, y+h, 0});
+        e.pts.push_back(m_wfScene ? m_wfScene->toWorld(x,   y+h) : Geom::Vec3{x,   y+h, 0});
+        commit(std::move(e));
         wchar_t msg[160] = {};
-        std::swprintf(msg, 160, L"Rectangle: origin=(%.4g,%.4g), %.4g×%.4g mm", x, y, w, h);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        std::swprintf(msg, 160, L"Rectangle: origin=(%.4g,%.4g), %.4g x %.4g mm", x, y, w, h);
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_RECT_SHAPES: {
         double w = 100, h = 50, cornerR = 0;
-        if (!promptDouble2(L"Rectangular Shape – Size",
+        if (!promptDouble2(L"Rectangular Shape - Size",
                            L"Width  (mm):", w, w,
                            L"Height (mm):", h, h)) return;
-        if (!promptSingle(L"Rectangular Shape – Corner",
+        if (!promptSingle(L"Rectangular Shape - Corner",
                           L"Corner fillet radius (0 = sharp, mm):", cornerR, cornerR)) return;
         if (w <= 0 || h <= 0) {
             MessageBoxW(m_hwnd, L"Width and height must be positive.",
@@ -2279,25 +2350,20 @@ void MainWindow::createWireframe(int commandId) {
             return;
         }
         if (cornerR < 0) cornerR = 0;
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            // 4 lines + up to 4 arcs for corners
-            int extra = (cornerR > 0) ? 8 : 4;
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + extra);
-        }
+        int extra = (cornerR > 0) ? 8 : 4;
+        bumpLevel(extra);
         wchar_t msg[192] = {};
         if (cornerR > 0)
             std::swprintf(msg, 192,
-                L"Rect Shape: %.4g×%.4g mm, fillet R=%.4g mm on all corners.", w, h, cornerR);
+                L"Rect Shape: %.4g x %.4g mm, fillet R=%.4g mm on all corners.", w, h, cornerR);
         else
-            std::swprintf(msg, 192, L"Rect Shape: %.4g×%.4g mm, sharp corners.", w, h);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+            std::swprintf(msg, 192, L"Rect Shape: %.4g x %.4g mm, sharp corners.", w, h);
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_POLYGON: {
-        double cx = 0, cy = 0, r = 25.0;
-        double sides = 6;
+        double cx = 0, cy = 0, r = 25.0, sides = 6;
         if (!promptTriple(L"Create Regular Polygon",
                           L"Centre X (mm):", cx, cx,
                           L"Centre Y (mm):", cy, cy,
@@ -2309,23 +2375,31 @@ void MainWindow::createWireframe(int commandId) {
                         L"Create Polygon", MB_OK | MB_ICONWARNING);
             return;
         }
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + n);
+        bumpLevel(n);
+        WfEntity e;
+        e.type   = WfEntityType::Polygon;
+        e.p0     = m_wfScene ? m_wfScene->toWorld(cx, cy) : Geom::Vec3{cx, cy, 0};
+        e.radius = r;
+        e.count  = n;
+        for (int i = 0; i < n; ++i) {
+            double a = kTwoPi * i / n;
+            double vx = cx + r * std::cos(a), vy = cy + r * std::sin(a);
+            e.pts.push_back(m_wfScene ? m_wfScene->toWorld(vx, vy) : Geom::Vec3{vx, vy, 0});
         }
+        commit(std::move(e));
         wchar_t msg[160] = {};
         std::swprintf(msg, 160, L"Regular polygon: %d sides, R=%.4g mm, centre=(%.4g,%.4g)",
                       n, r, cx, cy);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_ELLIPSE: {
         double cx = 0, cy = 0, a = 50.0, b = 25.0;
-        if (!promptDouble2(L"Create Ellipse – Centre",
+        if (!promptDouble2(L"Create Ellipse - Centre",
                            L"Centre X (mm):", cx, cx,
                            L"Centre Y (mm):", cy, cy)) return;
-        if (!promptDouble2(L"Create Ellipse – Axes",
+        if (!promptDouble2(L"Create Ellipse - Axes",
                            L"Semi-major axis a (mm):", a, a,
                            L"Semi-minor axis b (mm):", b, b)) return;
         if (a <= 0 || b <= 0) {
@@ -2333,14 +2407,17 @@ void MainWindow::createWireframe(int commandId) {
                         L"Create Ellipse", MB_OK | MB_ICONWARNING);
             return;
         }
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
-        }
+        bumpLevel();
+        WfEntity e;
+        e.type    = WfEntityType::Ellipse;
+        e.p0      = m_wfScene ? m_wfScene->toWorld(cx, cy) : Geom::Vec3{cx, cy, 0};
+        e.radius  = a;
+        e.radius2 = b;
+        commit(std::move(e));
         wchar_t msg[192] = {};
         std::swprintf(msg, 192,
             L"Ellipse: centre=(%.4g,%.4g), a=%.4g mm, b=%.4g mm", cx, cy, a, b);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
@@ -2356,20 +2433,25 @@ void MainWindow::createWireframe(int commandId) {
             return;
         }
         double totalHeight = pitch * revs;
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
-        }
+        bumpLevel();
+        WfEntity e;
+        e.type        = WfEntityType::Helix;
+        e.p0          = m_wfScene ? m_wfScene->toWorld(0, 0) : Geom::Vec3{};
+        e.radius      = r;
+        e.pitch       = pitch;
+        e.revolutions = revs;
+        e.height      = totalHeight;
+        commit(std::move(e));
         wchar_t msg[192] = {};
         std::swprintf(msg, 192,
             L"Helix: R=%.4g mm, pitch=%.4g mm, %.4g revs, height=%.4g mm",
             r, pitch, revs, totalHeight);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_BBOX: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Bounding Box: select geometry to generate its 2D/3D bounding rectangle."));
         break;
     }
@@ -2379,13 +2461,13 @@ void MainWindow::createWireframe(int commandId) {
     // -----------------------------------------------------------------------
 
     case IDM_WF_CURVE_ONE_EDGE: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Curve One Edge: select a single solid or surface edge to extract as wireframe."));
         break;
     }
 
     case IDM_WF_CURVE_ALL_EDGES: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Curve All Edges: select a solid or surface to extract all edges as wireframe."));
         break;
     }
@@ -2400,13 +2482,10 @@ void MainWindow::createWireframe(int commandId) {
                         L"Curve Slice by Plane", MB_OK | MB_ICONWARNING);
             return;
         }
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + n);
-        }
+        bumpLevel(n);
         wchar_t msg[128] = {};
         std::swprintf(msg, 128, L"Curve Slice by Plane: %d cross-section(s) generated.", n);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
@@ -2419,25 +2498,22 @@ void MainWindow::createWireframe(int commandId) {
                         L"Curve Slice Along Curve", MB_OK | MB_ICONWARNING);
             return;
         }
-        if (m_levelsMgr) {
-            Level* lv = m_levelsMgr->findLevel(1);
-            if (lv) m_levelsMgr->setEntityCount(1, lv->entityCount + 1);
-        }
+        bumpLevel();
         wchar_t msg[128] = {};
         std::swprintf(msg, 128,
             L"Curve Slice Along Curve: cross-sections every %.4g mm perpendicular to drive curve.", spacing);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_CURVE_FLOWLINE: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Curve Flowline: select a surface to extract U and V flowline curves."));
         break;
     }
 
     case IDM_WF_CURVE_INTERSECT: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Curve at Intersection: select two intersecting surfaces or solids to extract intersection curves."));
         break;
     }
@@ -2458,7 +2534,7 @@ void MainWindow::createWireframe(int commandId) {
         wchar_t msg[128] = {};
         std::swprintf(msg, 128,
             L"Fillet Entities: select two intersecting entities; fillet R=%.4g mm.", r);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
@@ -2479,45 +2555,147 @@ void MainWindow::createWireframe(int commandId) {
         else
             std::swprintf(msg, 160,
                 L"Chamfer Entities: select two entities; D1=%.4g mm, D2=%.4g mm.", d1, d2);
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_MOD_DYN_TRIM: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-            reinterpret_cast<LPARAM>(L"Dynamic Trim: click geometry to trim, break, or divide it at intersections."));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
+            reinterpret_cast<LPARAM>(L"Dynamic Trim: click geometry to trim, extend, break, or divide it at intersections."));
         break;
     }
 
     case IDM_WF_MOD_BREAK_TWO: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-            reinterpret_cast<LPARAM>(L"Break Two Pieces: click on an entity at the point where it should be split."));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
+            reinterpret_cast<LPARAM>(L"Break Two Pieces: click on an entity at the point where it should be split into two."));
         break;
     }
 
     case IDM_WF_MOD_BREAK_INT: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Break at Intersection: select intersecting entities to break them at all crossing points."));
         break;
     }
 
     case IDM_WF_MOD_JOIN: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Join Entities: select collinear lines or coincident arcs to recombine them into single entities."));
         break;
     }
 
     case IDM_WF_MOD_INTERSECT: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Modify at Intersection: select wireframe and a surface or mesh to break, trim, or create a point."));
         break;
     }
 
+    case IDM_WF_MOD_PROJECT: {
+        double nx = 0.0, ny = 0.0, nz = 1.0;
+        if (!promptTriple(L"Project Geometry",
+                          L"Plane normal X:", nx, nx,
+                          L"Plane normal Y:", ny, ny,
+                          L"Plane normal Z:", nz, nz)) return;
+        double nmag = std::sqrt(nx*nx + ny*ny + nz*nz);
+        if (nmag < 1e-9) {
+            MessageBoxW(m_hwnd, L"Normal vector must not be zero.",
+                        L"Project", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        nx /= nmag; ny /= nmag; nz /= nmag;
+        wchar_t msg[192] = {};
+        std::swprintf(msg, 192,
+            L"Project: select geometry to flatten onto plane with normal (%.3g, %.3g, %.3g).",
+            nx, ny, nz);
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_MOD_OFFSET: {
+        double dist = 10.0;
+        if (!promptSingle(L"Offset / Offset Chains",
+                          L"Offset distance (mm, negative = inward):", dist, dist)) return;
+        wchar_t msg[160] = {};
+        std::swprintf(msg, 160,
+            L"Offset: select wireframe or chain to offset by %.4g mm.", dist);
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_MOD_ROLL: {
+        double cylRadius = 50.0;
+        if (!promptSingle(L"Roll / Unroll",
+                          L"Cylinder radius (mm):", cylRadius, cylRadius)) return;
+        if (cylRadius <= 0) {
+            MessageBoxW(m_hwnd, L"Cylinder radius must be positive.",
+                        L"Roll / Unroll", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        wchar_t msg[160] = {};
+        std::swprintf(msg, 160,
+            L"Roll/Unroll: select geometry to wrap or unwrap from cylinder R=%.4g mm.", cylRadius);
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
     default:
-        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
             reinterpret_cast<LPARAM>(L"Wireframe command: select geometry in the viewport."));
         break;
     }
+}
+
+// ==========================================================================
+// Wireframe Cplane / Z-depth helpers
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+void MainWindow::updateWfStatusBar() {
+    if (!m_hStatusBar || !m_wfScene) return;
+
+    // Pane 1: Cplane name
+    wchar_t cpTxt[32] = {};
+    std::swprintf(cpTxt, 32, L"CPlane: %s", cplaneName(m_wfScene->cplane()));
+    SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_CPLANE,
+                reinterpret_cast<LPARAM>(cpTxt));
+
+    // Pane 2: Z-depth
+    wchar_t zTxt[32] = {};
+    std::swprintf(zTxt, 32, L"Z: %.4g", m_wfScene->zDepth());
+    SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_ZDEPTH,
+                reinterpret_cast<LPARAM>(zTxt));
+
+    // Pane 3: Snap placeholder (filled in by AutoCursor on hover)
+    SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_SNAP,
+                reinterpret_cast<LPARAM>(L"Snap: –"));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::wfCycleCplane() {
+    if (!m_wfScene) return;
+    m_wfScene->cycleCplane();
+    updateWfStatusBar();
+    // Inform the viewport so it can update the Cplane indicator in the render.
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[64] = {};
+    std::swprintf(msg, 64, L"Construction plane set to %s.", cplaneName(m_wfScene->cplane()));
+    SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::wfSetZDepth() {
+    if (!m_wfScene) return;
+    double z = m_wfScene->zDepth();
+    if (!promptSingle(L"Set Z-Depth",
+                      L"Z-depth for new wireframe entities (mm):", z, z)) return;
+    m_wfScene->setZDepth(z);
+    updateWfStatusBar();
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[80] = {};
+    std::swprintf(msg, 80, L"Z-depth set to %.4g mm (Cplane: %s).",
+                  z, cplaneName(m_wfScene->cplane()));
+    SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
 }
 
 // ==========================================================================
