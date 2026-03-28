@@ -290,6 +290,23 @@ LRESULT MainWindow::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         break;
     }
 
+    case WM_NOTIFY: {
+        auto* hdr = reinterpret_cast<NMHDR*>(lParam);
+        // Tab-control selection change: show/hide the Solids tree accordingly
+        if (hdr->hwndFrom == m_hManagersPanel &&
+            (hdr->code == TCN_SELCHANGE || hdr->code == TCN_SELCHANGING)) {
+            // Trigger a layout refresh so the tree visibility is updated
+            RECT rc;
+            GetClientRect(m_hwnd, &rc);
+            onSize(rc.right, rc.bottom);
+        }
+        // TreeView notifications from the Solids history tree
+        if (hdr->hwndFrom == m_hSolidsTree) {
+            onSolidsTreeNotify(hdr);
+        }
+        return 0;
+    }
+
     case WM_PAINT:
         onPaint();
         return 0;
@@ -336,6 +353,18 @@ void MainWindow::onCreate() {
     ti.pszText = const_cast<wchar_t*>(L"Planes");
     TabCtrl_InsertItem(m_hManagersPanel, 3, &ti);
 
+    // --- Solids history-tree (lives inside the managers panel, Solids tab) ---
+    // The TreeView is created as a child of the main window (not of the tab
+    // control) so that it can be shown/hidden independently when the user
+    // switches tabs.  It is positioned in onSize() / updateLayout().
+    m_hSolidsTree = CreateWindowExW(
+        0, WC_TREEVIEW, nullptr,
+        WS_CHILD | WS_VISIBLE | WS_BORDER |
+            TVS_HASLINES | TVS_LINESATROOT | TVS_HASBUTTONS | TVS_SHOWSELALWAYS,
+        0, 0, 0, 0,
+        m_hwnd,
+        reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_SOLIDS_TREE)), hInst, nullptr);
+
     // --- Ribbon UI ---
     m_ribbon = std::make_unique<RibbonUI>(m_hwnd, hInst);
 
@@ -367,8 +396,10 @@ void MainWindow::onCreate() {
     });
 
     // Connect the solids manager change callback to trigger a viewport redraw
+    // and rebuild the Solids history-tree panel.
     m_solidsMgr->setOnChange([this]() {
         if (m_viewport) m_viewport->redraw();
+        buildSolidsHistoryTree();
     });
 
     // Connect the surfaces manager change callback to trigger a viewport redraw
@@ -613,6 +644,21 @@ void MainWindow::updateLayout(int cx, int cy) {
                      0, viewY, MANAGERS_PANEL_WIDTH, viewH,
                      SWP_NOZORDER | SWP_NOACTIVATE);
 
+    // Solids history-tree – sits inside the managers panel below the tab strip.
+    // The tree is shown only when the "Solids" tab (index 1) is active.
+    if (m_hSolidsTree) {
+        int tabHeight = 24; // approximate tab-strip height in pixels
+        int treeY     = viewY + tabHeight;
+        int treeH     = viewH - tabHeight;
+        int activeSolidsTab = m_hManagersPanel
+            ? TabCtrl_GetCurSel(m_hManagersPanel) : -1;
+        bool solidsTabActive = (activeSolidsTab == 1);
+        SetWindowPos(m_hSolidsTree, nullptr,
+                     0, treeY, MANAGERS_PANEL_WIDTH, treeH,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        ShowWindow(m_hSolidsTree, solidsTabActive ? SW_SHOW : SW_HIDE);
+    }
+
     // Ribbon
     if (m_ribbon)
         m_ribbon->resize(0, 0, cx, RIBBON_HEIGHT);
@@ -773,6 +819,37 @@ void MainWindow::onCommand(int id) {
     case IDM_SOLID_HOLE:      solidHole();           break;
     case IDM_SOLID_IMPRESS:   solidImpression();     break;
     case IDM_SOLID_FROM_SURF: solidFromSurfaces();   break;
+
+    // Solids history-tree context-menu commands
+    case IDM_SOLID_TREE_EDIT:
+    case IDM_SOLID_TREE_SUPPRESS:
+    case IDM_SOLID_TREE_DELETE:
+        // Delegate to the notify handler which already knows the selected item
+        if (m_hSolidsTree) {
+            HTREEITEM hSel = TreeView_GetSelection(m_hSolidsTree);
+            if (hSel) {
+                TVITEMW tvi = {};
+                tvi.mask  = TVIF_PARAM;
+                tvi.hItem = hSel;
+                TreeView_GetItem(m_hSolidsTree, &tvi);
+                // lParam encoding: high 16 bits = solidIdx, low 16 bits = featureIdx
+                // featureIdx == 0xFFFF means the item is a solid root, not a feature
+                int solidIdx   = static_cast<int>((tvi.lParam >> 16) & 0xFFFF);
+                int featureIdx = static_cast<int>(tvi.lParam        & 0xFFFF);
+                if (featureIdx != 0xFFFF && m_solidsMgr) {
+                    if (id == IDM_SOLID_TREE_EDIT) {
+                        solidEditFeature(solidIdx, featureIdx);
+                    } else if (id == IDM_SOLID_TREE_SUPPRESS) {
+                        bool suppressed =
+                            m_solidsMgr->getFeature(solidIdx, featureIdx).suppressed;
+                        m_solidsMgr->suppressFeature(solidIdx, featureIdx, !suppressed);
+                    } else { // IDM_SOLID_TREE_DELETE
+                        m_solidsMgr->removeFeature(solidIdx, featureIdx);
+                    }
+                }
+            }
+        }
+        break;
 
     case IDM_PREP_HEAL:        prepHeal();         break;
     case IDM_PREP_REM_FILLET:  prepRemoveFillet(); break;
@@ -1523,7 +1600,291 @@ bool MainWindow::promptTriple(const wchar_t* title,
 // ==========================================================================
 
 // --------------------------------------------------------------------------
-// IDM_SOLID_EXTRUDE → create a parametric box and add it to SolidsManager
+// promptBodyOpType – ask the user to choose Create Body / Add Boss / Cut Body.
+// Shows a simple MessageBox with three choices (via a cascading Yes/No prompt).
+// Returns true if the user confirmed a selection.
+// --------------------------------------------------------------------------
+bool MainWindow::promptBodyOpType(BodyOpType& out) {
+    // Use a three-way choice dialog built from two MessageBox calls:
+    // First ask: "Add to existing solid? Yes=AddBoss/CutBody, No=CreateBody"
+    int r1 = MessageBoxW(m_hwnd,
+        L"Operation type:\n\n"
+        L"[Yes]  Add to / Cut from an existing solid\n"
+        L"[No]   Create a brand-new independent solid body\n"
+        L"[Cancel]  Abort",
+        L"Operation Type",
+        MB_YESNOCANCEL | MB_ICONQUESTION);
+    if (r1 == IDCANCEL) return false;
+    if (r1 == IDNO) {
+        out = BodyOpType::CreateBody;
+        return true;
+    }
+    // Yes → ask whether to Add Boss or Cut Body
+    int r2 = MessageBoxW(m_hwnd,
+        L"[Yes]  Add Boss (merge / add material)\n"
+        L"[No]   Cut Body (carve / remove material)",
+        L"Add or Cut?",
+        MB_YESNO | MB_ICONQUESTION);
+    out = (r2 == IDYES) ? BodyOpType::AddBoss : BodyOpType::CutBody;
+    return true;
+}
+
+// --------------------------------------------------------------------------
+// buildSolidsHistoryTree – rebuild the TreeView from the current SolidsManager
+// state.  Each solid is a root node; each FeatureOp is a child branch.
+// --------------------------------------------------------------------------
+void MainWindow::buildSolidsHistoryTree() {
+    if (!m_hSolidsTree || !m_solidsMgr) return;
+
+    // Freeze the TreeView during the update to avoid flicker.
+    SendMessage(m_hSolidsTree, WM_SETREDRAW, FALSE, 0);
+    TreeView_DeleteAllItems(m_hSolidsTree);
+
+    for (int si = 0; si < m_solidsMgr->count(); ++si) {
+        const SolidEntry& entry = m_solidsMgr->at(si);
+
+        // Solid root node
+        std::wstring solidName(entry.solid.name().begin(), entry.solid.name().end());
+        if (solidName.empty()) solidName = L"Solid";
+
+        TVINSERTSTRUCTW ins = {};
+        ins.hParent         = TVI_ROOT;
+        ins.hInsertAfter    = TVI_LAST;
+        ins.item.mask       = TVIF_TEXT | TVIF_PARAM | TVIF_STATE;
+        ins.item.pszText    = const_cast<LPWSTR>(solidName.c_str());
+        // Encode solid index; 0xFFFF in low 16 bits → root node (no feature)
+        ins.item.lParam     = static_cast<LPARAM>((si << 16) | 0xFFFF);
+        ins.item.stateMask  = TVIS_BOLD;
+        ins.item.state      = TVIS_BOLD;
+        HTREEITEM hRoot = TreeView_InsertItem(m_hSolidsTree, &ins);
+
+        // Feature child nodes
+        for (int fi = 0; fi < m_solidsMgr->featureCount(si); ++fi) {
+            const FeatureOp& op = m_solidsMgr->getFeature(si, fi);
+
+            std::wstring featureLabel(op.label.begin(), op.label.end());
+            if (op.suppressed) featureLabel = L"[suppressed] " + featureLabel;
+
+            TVINSERTSTRUCTW fIns = {};
+            fIns.hParent        = hRoot;
+            fIns.hInsertAfter   = TVI_LAST;
+            fIns.item.mask      = TVIF_TEXT | TVIF_PARAM;
+            fIns.item.pszText   = const_cast<LPWSTR>(featureLabel.c_str());
+            // Encode solid + feature index into lParam
+            fIns.item.lParam    = static_cast<LPARAM>((si << 16) | (fi & 0xFFFF));
+            TreeView_InsertItem(m_hSolidsTree, &fIns);
+        }
+
+        // Auto-expand the root node so features are visible immediately
+        if (hRoot) TreeView_Expand(m_hSolidsTree, hRoot, TVE_EXPAND);
+    }
+
+    SendMessage(m_hSolidsTree, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(m_hSolidsTree, nullptr, TRUE);
+}
+
+// --------------------------------------------------------------------------
+// onSolidsTreeNotify – handle WM_NOTIFY messages from the Solids TreeView.
+// --------------------------------------------------------------------------
+void MainWindow::onSolidsTreeNotify(NMHDR* hdr) {
+    if (!hdr) return;
+
+    if (hdr->code == NM_RCLICK) {
+        // Determine which item is under the cursor
+        POINT pt;
+        GetCursorPos(&pt);
+        ScreenToClient(m_hSolidsTree, &pt);
+
+        TVHITTESTINFO htInfo = {};
+        htInfo.pt = pt;
+        HTREEITEM hItem = TreeView_HitTest(m_hSolidsTree, &htInfo);
+        if (!hItem) return;
+
+        // Select the right-clicked item
+        TreeView_SelectItem(m_hSolidsTree, hItem);
+
+        // Read the lParam to decide if this is a feature node or a root node
+        TVITEMW tvi = {};
+        tvi.mask  = TVIF_PARAM;
+        tvi.hItem = hItem;
+        TreeView_GetItem(m_hSolidsTree, &tvi);
+        int featureIdx = static_cast<int>(tvi.lParam & 0xFFFF);
+        bool isFeatureNode = (featureIdx != 0xFFFF);
+
+        // Build context menu
+        HMENU hMenu = CreatePopupMenu();
+        if (isFeatureNode) {
+            AppendMenuW(hMenu, MF_STRING, IDM_SOLID_TREE_EDIT,     L"&Edit Feature...");
+            AppendMenuW(hMenu, MF_STRING, IDM_SOLID_TREE_SUPPRESS, L"&Suppress / Unsuppress");
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(hMenu, MF_STRING, IDM_SOLID_TREE_DELETE,   L"&Delete Feature");
+        } else {
+            AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0,
+                        L"(Select a feature branch to edit)");
+        }
+
+        // Show the menu at the cursor position
+        POINT screenPt;
+        GetCursorPos(&screenPt);
+        TrackPopupMenu(hMenu, TPM_RIGHTBUTTON,
+                       screenPt.x, screenPt.y, 0, m_hwnd, nullptr);
+        DestroyMenu(hMenu);
+    }
+}
+
+// --------------------------------------------------------------------------
+// solidEditFeature – re-prompt for feature parameters and update the solid.
+// --------------------------------------------------------------------------
+void MainWindow::solidEditFeature(int solidIdx, int featureIdx) {
+    if (!m_solidsMgr) return;
+    if (solidIdx < 0 || solidIdx >= m_solidsMgr->count()) return;
+    if (featureIdx < 0 || featureIdx >= m_solidsMgr->featureCount(solidIdx)) return;
+
+    FeatureOp op = m_solidsMgr->getFeature(solidIdx, featureIdx);
+
+    // Re-prompt based on operation type
+    bool ok = false;
+    switch (op.opType) {
+    case FeatureOpType::Block:
+    case FeatureOpType::Extrude:
+        ok = promptTriple(L"Edit Feature – Box/Extrude",
+                          L"Length X (mm):", op.param1, op.param1,
+                          L"Width  Y (mm):", op.param2, op.param2,
+                          L"Height Z (mm):", op.param3, op.param3);
+        if (ok && (op.param1 <= 0 || op.param2 <= 0 || op.param3 <= 0)) {
+            MessageBoxW(m_hwnd, L"Dimensions must be positive.",
+                        L"Edit Feature", MB_OK | MB_ICONWARNING);
+            ok = false;
+        }
+        if (ok) {
+            // Rebuild the underlying BRep solid geometry
+            BRep::Solid updated = BRep::Solid::makeBox(op.param1, op.param2, op.param3);
+            updated.setName(m_solidsMgr->at(solidIdx).solid.name());
+            m_solidsMgr->at(solidIdx).solid = std::move(updated);
+            // Update the label to reflect new dimensions
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Box %.4g×%.4g×%.4g mm",
+                          op.param1, op.param2, op.param3);
+            op.label = buf;
+        }
+        break;
+
+    case FeatureOpType::Cylinder:
+    case FeatureOpType::Revolve:
+        ok = promptDouble2(L"Edit Feature – Cylinder/Revolve",
+                           L"Radius (mm):", op.param1, op.param1,
+                           L"Height (mm):", op.param2, op.param2);
+        if (ok && (op.param1 <= 0 || op.param2 <= 0)) {
+            MessageBoxW(m_hwnd, L"Radius and height must be positive.",
+                        L"Edit Feature", MB_OK | MB_ICONWARNING);
+            ok = false;
+        }
+        if (ok) {
+            BRep::Solid updated = BRep::Solid::makeCylinder(op.param1, op.param2);
+            updated.setName(m_solidsMgr->at(solidIdx).solid.name());
+            m_solidsMgr->at(solidIdx).solid = std::move(updated);
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Cylinder R=%.4g H=%.4g mm",
+                          op.param1, op.param2);
+            op.label = buf;
+        }
+        break;
+
+    case FeatureOpType::Sphere:
+        ok = promptSingle(L"Edit Feature – Sphere",
+                          L"Radius (mm):", op.param1, op.param1);
+        if (ok && op.param1 <= 0) {
+            MessageBoxW(m_hwnd, L"Radius must be positive.",
+                        L"Edit Feature", MB_OK | MB_ICONWARNING);
+            ok = false;
+        }
+        if (ok) {
+            BRep::Solid updated = BRep::Solid::makeSphere(op.param1);
+            updated.setName(m_solidsMgr->at(solidIdx).solid.name());
+            m_solidsMgr->at(solidIdx).solid = std::move(updated);
+            char buf[48];
+            std::snprintf(buf, sizeof(buf), "Sphere R=%.4g mm", op.param1);
+            op.label = buf;
+        }
+        break;
+
+    case FeatureOpType::Fillet: {
+        ok = promptSingle(L"Edit Feature – Fillet",
+                          L"Fillet radius (mm):", op.param1, op.param1);
+        if (ok && op.param1 <= 0) {
+            MessageBoxW(m_hwnd, L"Radius must be positive.",
+                        L"Edit Feature", MB_OK | MB_ICONWARNING);
+            ok = false;
+        }
+        if (ok) {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Fillet R=%.4g mm", op.param1);
+            op.label = buf;
+        }
+        break;
+    }
+
+    case FeatureOpType::Chamfer: {
+        ok = promptDouble2(L"Edit Feature – Chamfer",
+                           L"Distance 1 (mm):", op.param1, op.param1,
+                           L"Distance 2 (mm):", op.param2, op.param2);
+        if (ok && (op.param1 <= 0 || op.param2 <= 0)) {
+            MessageBoxW(m_hwnd, L"Distances must be positive.",
+                        L"Edit Feature", MB_OK | MB_ICONWARNING);
+            ok = false;
+        }
+        if (ok) {
+            char buf[80];
+            std::snprintf(buf, sizeof(buf), "Chamfer D1=%.4g D2=%.4g mm",
+                          op.param1, op.param2);
+            op.label = buf;
+        }
+        break;
+    }
+
+    case FeatureOpType::Hole: {
+        ok = promptDouble2(L"Edit Feature – Hole",
+                           L"Hole diameter (mm):", op.param1, op.param1,
+                           L"Hole depth    (mm):", op.param2, op.param2);
+        if (ok && (op.param1 <= 0 || op.param2 <= 0)) {
+            MessageBoxW(m_hwnd, L"Diameter and depth must be positive.",
+                        L"Edit Feature", MB_OK | MB_ICONWARNING);
+            ok = false;
+        }
+        if (ok) {
+            char buf[80];
+            std::snprintf(buf, sizeof(buf), "Hole Ø%.4g×%.4g mm",
+                          op.param1, op.param2);
+            op.label = buf;
+        }
+        break;
+    }
+
+    default:
+        MessageBoxW(m_hwnd,
+            L"Editing is not yet supported for this feature type.",
+            L"Edit Feature", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    if (ok) {
+        m_solidsMgr->editFeature(solidIdx, featureIdx, op);
+        // Notify copilot about the updated solid
+        if (m_copilotEngine) {
+            FeatureRecognition fr;
+            auto features = fr.recognise(m_solidsMgr->at(solidIdx).solid);
+            m_copilotEngine->setRecognisedFeatures(features);
+        }
+        wchar_t msg[160] = {};
+        std::wstring wlabel(op.label.begin(), op.label.end());
+        std::swprintf(msg, 160, L"Feature updated: %s", wlabel.c_str());
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
+                    reinterpret_cast<LPARAM>(msg));
+    }
+}
+
+// --------------------------------------------------------------------------
+// IDM_SOLID_EXTRUDE → create a parametric box/extrude and record in history
 // --------------------------------------------------------------------------
 void MainWindow::createSolidBox() {
     double dx = 100.0, dy = 50.0, dz = 25.0;
@@ -1539,6 +1900,10 @@ void MainWindow::createSolidBox() {
         return;
     }
 
+    // Ask whether to create a new body, add boss, or cut
+    BodyOpType bodyOp = BodyOpType::CreateBody;
+    if (!promptBodyOpType(bodyOp)) return;
+
     BRep::Solid box = BRep::Solid::makeBox(dx, dy, dz);
 
     // Generate a unique name
@@ -1548,10 +1913,25 @@ void MainWindow::createSolidBox() {
 
     m_solidsMgr->addSolid(std::move(box));
 
+    // Record this operation in the history tree
+    FeatureOp op;
+    op.opType  = FeatureOpType::Extrude;
+    op.bodyOp  = bodyOp;
+    op.param1  = dx;
+    op.param2  = dy;
+    op.param3  = dz;
+    {
+        char buf[80];
+        std::snprintf(buf, sizeof(buf), "Extrude %.4g×%.4g×%.4g mm", dx, dy, dz);
+        op.label = buf;
+    }
+    int solidIdx = m_solidsMgr->count() - 1;
+    m_solidsMgr->addFeature(solidIdx, op);
+
     // Run feature recognition so Copilot can reason about the new solid
     if (m_copilotEngine) {
         FeatureRecognition fr;
-        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        auto features = fr.recognise(m_solidsMgr->at(solidIdx).solid);
         m_copilotEngine->setRecognisedFeatures(features);
     }
 
@@ -1564,7 +1944,7 @@ void MainWindow::createSolidBox() {
 }
 
 // --------------------------------------------------------------------------
-// IDM_SOLID_REVOLVE → create a parametric cylinder
+// IDM_SOLID_REVOLVE → create a parametric cylinder/revolve and record history
 // --------------------------------------------------------------------------
 void MainWindow::createSolidCylinder() {
     double radius = 25.0, height = 50.0;
@@ -1579,6 +1959,9 @@ void MainWindow::createSolidCylinder() {
         return;
     }
 
+    BodyOpType bodyOp = BodyOpType::CreateBody;
+    if (!promptBodyOpType(bodyOp)) return;
+
     BRep::Solid cyl = BRep::Solid::makeCylinder(radius, height);
 
     static int cylCount = 0;
@@ -1587,9 +1970,23 @@ void MainWindow::createSolidCylinder() {
 
     m_solidsMgr->addSolid(std::move(cyl));
 
+    // Record in history
+    FeatureOp op;
+    op.opType  = FeatureOpType::Revolve;
+    op.bodyOp  = bodyOp;
+    op.param1  = radius;
+    op.param2  = height;
+    {
+        char buf[80];
+        std::snprintf(buf, sizeof(buf), "Revolve R=%.4g H=%.4g mm", radius, height);
+        op.label = buf;
+    }
+    int solidIdx = m_solidsMgr->count() - 1;
+    m_solidsMgr->addFeature(solidIdx, op);
+
     if (m_copilotEngine) {
         FeatureRecognition fr;
-        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        auto features = fr.recognise(m_solidsMgr->at(solidIdx).solid);
         m_copilotEngine->setRecognisedFeatures(features);
     }
 
@@ -1600,6 +1997,7 @@ void MainWindow::createSolidCylinder() {
 
 // --------------------------------------------------------------------------
 // Boolean solid operations – require at least 2 solids
+// Records the operation in the active solid's history tree.
 // --------------------------------------------------------------------------
 void MainWindow::solidBooleanOp(int commandId) {
     if (!m_solidsMgr || m_solidsMgr->count() < 2) {
@@ -1609,25 +2007,52 @@ void MainWindow::solidBooleanOp(int commandId) {
         return;
     }
 
+    FeatureOpType opType = FeatureOpType::BoolUnion;
     const wchar_t* opName = L"Boolean";
     switch (commandId) {
-    case IDM_SOLID_UNION:     opName = L"Add (Union)";          break;
-    case IDM_SOLID_SUBTRACT:  opName = L"Remove (Subtract)";    break;
-    case IDM_SOLID_INTERSECT: opName = L"Common (Intersect)";   break;
+    case IDM_SOLID_UNION:
+        opType = FeatureOpType::BoolUnion;
+        opName = L"Add (Union)";
+        break;
+    case IDM_SOLID_SUBTRACT:
+        opType = FeatureOpType::BoolSubtract;
+        opName = L"Remove (Subtract)";
+        break;
+    case IDM_SOLID_INTERSECT:
+        opType = FeatureOpType::BoolIntersect;
+        opName = L"Common (Intersect)";
+        break;
     }
+
+    // Record the boolean op on the last solid (the "target")
+    int targetIdx = m_solidsMgr->count() - 1;
+    FeatureOp op;
+    op.opType = opType;
+    op.bodyOp = BodyOpType::CreateBody;  // result becomes the new body
+    {
+        char buf[80];
+        // Label includes the count of participating solids
+        std::snprintf(buf, sizeof(buf), "%ls (%d solids)",
+                      opName,
+                      m_solidsMgr->count());
+        op.label = buf;
+    }
+    m_solidsMgr->addFeature(targetIdx, op);
 
     // Inform user: full kernel-level boolean operations require a geometry
     // kernel (e.g. OCCT). For now, report the intent clearly.
     std::wstring msg = std::wstring(opName)
-        + L": operation queued on solid pair ("
-        + std::to_wstring(m_solidsMgr->count())
-        + L" solids in session). Requires geometric kernel for execution.";
+        + L": operation recorded on solid \""
+        + std::wstring(m_solidsMgr->at(targetIdx).solid.name().begin(),
+                       m_solidsMgr->at(targetIdx).solid.name().end())
+        + L"\" (requires full geometry kernel for mesh-level execution).";
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
         reinterpret_cast<LPARAM>(msg.c_str()));
 }
 
 // --------------------------------------------------------------------------
 // Solid Modify operations – Fillet, Chamfer, Shell, Draft, Trim
+// Records each operation in the active solid's history tree.
 // --------------------------------------------------------------------------
 void MainWindow::solidModify(int commandId) {
     if (!m_solidsMgr || m_solidsMgr->count() == 0) {
@@ -1635,6 +2060,8 @@ void MainWindow::solidModify(int commandId) {
             reinterpret_cast<LPARAM>(L"Solid Modify: no solid is loaded. Create or import a solid first."));
         return;
     }
+
+    int solidIdx = m_solidsMgr->count() - 1;  // active solid (last added)
 
     switch (commandId) {
 
@@ -1646,6 +2073,15 @@ void MainWindow::solidModify(int commandId) {
                         L"Solid Fillet", MB_OK | MB_ICONWARNING);
             return;
         }
+        FeatureOp op;
+        op.opType = FeatureOpType::Fillet;
+        op.param1 = r;
+        {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Fillet R=%.4g mm", r);
+            op.label = buf;
+        }
+        m_solidsMgr->addFeature(solidIdx, op);
         wchar_t msg[128] = {};
         std::swprintf(msg, 128,
             L"Solid Fillet: select edges to round with R=%.4g mm.", r);
@@ -1663,6 +2099,16 @@ void MainWindow::solidModify(int commandId) {
                         L"Solid Chamfer", MB_OK | MB_ICONWARNING);
             return;
         }
+        FeatureOp op;
+        op.opType = FeatureOpType::Chamfer;
+        op.param1 = d1;
+        op.param2 = d2;
+        {
+            char buf[80];
+            std::snprintf(buf, sizeof(buf), "Chamfer D1=%.4g D2=%.4g mm", d1, d2);
+            op.label = buf;
+        }
+        m_solidsMgr->addFeature(solidIdx, op);
         wchar_t msg[160] = {};
         if (std::abs(d1 - d2) < 1e-9)
             std::swprintf(msg, 160,
@@ -1682,6 +2128,15 @@ void MainWindow::solidModify(int commandId) {
                         L"Shell Solid", MB_OK | MB_ICONWARNING);
             return;
         }
+        FeatureOp op;
+        op.opType = FeatureOpType::Shell;
+        op.param1 = thickness;
+        {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Shell thickness=%.4g mm", thickness);
+            op.label = buf;
+        }
+        m_solidsMgr->addFeature(solidIdx, op);
         wchar_t msg[128] = {};
         std::swprintf(msg, 128,
             L"Shell Solid: select open face(s); wall thickness=%.4g mm.", thickness);
@@ -1697,6 +2152,15 @@ void MainWindow::solidModify(int commandId) {
                         L"Draft Faces", MB_OK | MB_ICONWARNING);
             return;
         }
+        FeatureOp op;
+        op.opType = FeatureOpType::Draft;
+        op.param1 = angle;
+        {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Draft %.4g°", angle);
+            op.label = buf;
+        }
+        m_solidsMgr->addFeature(solidIdx, op);
         wchar_t msg[128] = {};
         std::swprintf(msg, 128,
             L"Draft Faces: select vertical faces to taper at %.4g° for moulding pull.", angle);
@@ -1705,6 +2169,10 @@ void MainWindow::solidModify(int commandId) {
     }
 
     case IDM_SOLID_TRIM: {
+        FeatureOp op;
+        op.opType = FeatureOpType::Trim;
+        op.label  = "Trim (plane / surface)";
+        m_solidsMgr->addFeature(solidIdx, op);
         SendMessage(m_hStatusBar, SB_SETTEXT, 0,
             reinterpret_cast<LPARAM>(
                 L"Trim Solid: select a plane, surface, or solid sheet to use as the cutting tool."));
@@ -1720,8 +2188,25 @@ void MainWindow::solidModify(int commandId) {
 
 // --------------------------------------------------------------------------
 // IDM_SOLID_SWEEP → sweep a profile along a path curve
+// Records the pending operation in the active solid's history.
 // --------------------------------------------------------------------------
 void MainWindow::createSolidSweep() {
+    if (!m_solidsMgr || m_solidsMgr->count() == 0) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(
+                L"Solid Sweep: no active solid. Create or import a solid first, "
+                L"then select a 2D profile chain and a path curve."));
+        return;
+    }
+    // Link the pending Sweep op to the wireframe chain that the user will select.
+    // The wfChainIdx will be updated when the user picks the profile in the scene.
+    FeatureOp op;
+    op.opType    = FeatureOpType::Sweep;
+    op.label     = "Sweep (awaiting profile + path selection)";
+    op.wfChainIdx = -1;  // will be resolved when user selects a chain
+    int solidIdx = m_solidsMgr->count() - 1;
+    m_solidsMgr->addFeature(solidIdx, op);
+
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
         reinterpret_cast<LPARAM>(
             L"Solid Sweep: select a 2D profile chain, then select the path curve to sweep along."));
@@ -1740,6 +2225,19 @@ void MainWindow::createSolidLoft() {
                     L"Solid Loft", MB_OK | MB_ICONWARNING);
         return;
     }
+
+    if (m_solidsMgr && m_solidsMgr->count() > 0) {
+        FeatureOp op;
+        op.opType = FeatureOpType::Loft;
+        op.param1 = static_cast<double>(n);
+        {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Loft (%d sections)", n);
+            op.label = buf;
+        }
+        m_solidsMgr->addFeature(m_solidsMgr->count() - 1, op);
+    }
+
     wchar_t msg[128] = {};
     std::swprintf(msg, 128,
         L"Solid Loft: select %d cross-section chain(s) to blend into a smooth solid.", n);
@@ -1757,6 +2255,19 @@ void MainWindow::createSolidThicken() {
                     L"Thicken Surface", MB_OK | MB_ICONWARNING);
         return;
     }
+
+    if (m_solidsMgr && m_solidsMgr->count() > 0) {
+        FeatureOp op;
+        op.opType = FeatureOpType::Thicken;
+        op.param1 = thickness;
+        {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Thicken t=%.4g mm", thickness);
+            op.label = buf;
+        }
+        m_solidsMgr->addFeature(m_solidsMgr->count() - 1, op);
+    }
+
     wchar_t msg[128] = {};
     std::swprintf(msg, 128,
         L"Thicken Surface: select a surface; thickness=%.4g mm.", thickness);
@@ -1780,6 +2291,9 @@ void MainWindow::createSolidBlock() {
         return;
     }
 
+    BodyOpType bodyOp = BodyOpType::CreateBody;
+    if (!promptBodyOpType(bodyOp)) return;
+
     BRep::Solid block = BRep::Solid::makeBox(dx, dy, dz);
 
     static int blockCount = 0;
@@ -1788,9 +2302,24 @@ void MainWindow::createSolidBlock() {
 
     m_solidsMgr->addSolid(std::move(block));
 
+    // Record in history
+    FeatureOp op;
+    op.opType = FeatureOpType::Block;
+    op.bodyOp = bodyOp;
+    op.param1 = dx;
+    op.param2 = dy;
+    op.param3 = dz;
+    {
+        char buf[80];
+        std::snprintf(buf, sizeof(buf), "Block %.4g×%.4g×%.4g mm", dx, dy, dz);
+        op.label = buf;
+    }
+    int solidIdx = m_solidsMgr->count() - 1;
+    m_solidsMgr->addFeature(solidIdx, op);
+
     if (m_copilotEngine) {
         FeatureRecognition fr;
-        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        auto features = fr.recognise(m_solidsMgr->at(solidIdx).solid);
         m_copilotEngine->setRecognisedFeatures(features);
     }
 
@@ -1818,6 +2347,9 @@ void MainWindow::createSolidCone() {
         return;
     }
 
+    BodyOpType bodyOp = BodyOpType::CreateBody;
+    if (!promptBodyOpType(bodyOp)) return;
+
     // NOTE: A true cone requires a swept/tapered kernel primitive. The current
     // BRep layer does not expose a makeCone() method, so the solid is stored
     // using makeCylinder() as a bounding-volume stand-in. The name, parameters,
@@ -1830,9 +2362,23 @@ void MainWindow::createSolidCone() {
 
     m_solidsMgr->addSolid(std::move(cone));
 
+    FeatureOp op;
+    op.opType = FeatureOpType::Cone;
+    op.bodyOp = bodyOp;
+    op.param1 = r1;
+    op.param2 = r2;
+    op.param3 = h;
+    {
+        char buf[80];
+        std::snprintf(buf, sizeof(buf), "Cone R1=%.4g R2=%.4g H=%.4g mm", r1, r2, h);
+        op.label = buf;
+    }
+    int solidIdx = m_solidsMgr->count() - 1;
+    m_solidsMgr->addFeature(solidIdx, op);
+
     if (m_copilotEngine) {
         FeatureRecognition fr;
-        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        auto features = fr.recognise(m_solidsMgr->at(solidIdx).solid);
         m_copilotEngine->setRecognisedFeatures(features);
     }
 
@@ -1863,6 +2409,9 @@ void MainWindow::createSolidTorus() {
         return;
     }
 
+    BodyOpType bodyOp = BodyOpType::CreateBody;
+    if (!promptBodyOpType(bodyOp)) return;
+
     // NOTE: A true torus requires a revolved-circle kernel primitive. The current
     // BRep layer does not expose a makeTorus() method, so the solid is stored
     // using makeSphere() with the major radius as a bounding-volume stand-in.
@@ -1875,9 +2424,22 @@ void MainWindow::createSolidTorus() {
 
     m_solidsMgr->addSolid(std::move(torus));
 
+    FeatureOp op;
+    op.opType = FeatureOpType::Torus;
+    op.bodyOp = bodyOp;
+    op.param1 = majorR;
+    op.param2 = minorR;
+    {
+        char buf[80];
+        std::snprintf(buf, sizeof(buf), "Torus MajR=%.4g MinR=%.4g mm", majorR, minorR);
+        op.label = buf;
+    }
+    int solidIdx = m_solidsMgr->count() - 1;
+    m_solidsMgr->addFeature(solidIdx, op);
+
     if (m_copilotEngine) {
         FeatureRecognition fr;
-        auto features = fr.recognise(m_solidsMgr->at(m_solidsMgr->count() - 1).solid);
+        auto features = fr.recognise(m_solidsMgr->at(solidIdx).solid);
         m_copilotEngine->setRecognisedFeatures(features);
     }
 
@@ -1889,6 +2451,7 @@ void MainWindow::createSolidTorus() {
 
 // --------------------------------------------------------------------------
 // IDM_SOLID_HOLE → hole wizard (simple / counterbore / countersink / threaded)
+// Records the Hole op in the active solid's history tree (CutBody).
 // --------------------------------------------------------------------------
 void MainWindow::solidHole() {
     if (!m_solidsMgr || m_solidsMgr->count() == 0) {
@@ -1907,6 +2470,19 @@ void MainWindow::solidHole() {
                     L"Hole Wizard", MB_OK | MB_ICONWARNING);
         return;
     }
+
+    // Holes always cut material from the active solid
+    FeatureOp op;
+    op.opType = FeatureOpType::Hole;
+    op.bodyOp = BodyOpType::CutBody;
+    op.param1 = dia;
+    op.param2 = depth;
+    {
+        char buf[80];
+        std::snprintf(buf, sizeof(buf), "Hole Ø%.4g×%.4g mm", dia, depth);
+        op.label = buf;
+    }
+    m_solidsMgr->addFeature(m_solidsMgr->count() - 1, op);
 
     wchar_t msg[160] = {};
     std::swprintf(msg, 160,

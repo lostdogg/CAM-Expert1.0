@@ -7,13 +7,13 @@
 #include "simulation/Verify.h"
 #include "cad/BRep.h"
 #include "cad/WireframeScene.h"
+#include "managers/SolidsManager.h"
 
 // Forward declarations
 class RibbonUI;
 class Viewport3D;
 class SelectionBar;
 class ToolpathManager;
-class SolidsManager;
 class SurfacesManager;
 class LevelsManager;
 class PlanesManager;
@@ -27,6 +27,7 @@ constexpr int IDC_MANAGERS_PANEL  = 102;
 constexpr int IDC_STATUS_BAR      = 103;
 constexpr int IDC_SELECTION_BAR   = 104;
 constexpr int IDC_COPILOT_PANEL   = 105;
+constexpr int IDC_SOLIDS_TREE     = 106;  // TreeView inside the Solids manager tab
 
 // Menu command IDs
 constexpr int IDM_FILE_NEW        = 1001;
@@ -168,6 +169,11 @@ constexpr int IDM_SOLID_HOLE      = 4219;  // Hole wizard (simple/counterbore/co
 constexpr int IDM_SOLID_IMPRESS   = 4220;  // Impression: negative of a solid (mold / electrode)
 constexpr int IDM_SOLID_FROM_SURF = 4221;  // Convert closed surfaces to a watertight solid
 
+// Solids history-tree context-menu commands
+constexpr int IDM_SOLID_TREE_EDIT     = 4230; // Edit the selected feature's parameters
+constexpr int IDM_SOLID_TREE_SUPPRESS = 4231; // Toggle suppression of the selected feature
+constexpr int IDM_SOLID_TREE_DELETE   = 4232; // Remove the selected feature from the tree
+
 // Model Prep tab commands
 constexpr int IDM_PREP_HEAL       = 4301;
 constexpr int IDM_PREP_REM_FILLET = 4302;
@@ -288,6 +294,15 @@ private:
     void solidImpression();       // IDM_SOLID_IMPRESS: impression/negative of solid
     void solidFromSurfaces();     // IDM_SOLID_FROM_SURF: closed surfaces → solid
 
+    // Solids history-tree panel (embedded in the Managers panel "Solids" tab)
+    void buildSolidsHistoryTree();        // populate the TreeView from SolidsManager
+    void onSolidsTreeNotify(NMHDR* hdr); // WM_NOTIFY dispatcher for the TreeView
+    void solidEditFeature(int solidIdx, int featureIdx); // re-prompt and update
+
+    // Prompt for a body-operation mode (Create Body / Add Boss / Cut Body).
+    // Returns true if the user confirmed a choice; fills *out* with the result.
+    bool promptBodyOpType(BodyOpType& out);
+
     // --- Wireframe primitive creation (Wireframe tab) ---
     void createWireframe(int commandId);
     void wfCycleCplane();      // IDM_WF_SET_CPLANE – advance to the next Cplane
@@ -355,6 +370,7 @@ private:
     HWND                              m_hwnd          = nullptr;
     HWND                              m_hStatusBar    = nullptr;
     HWND                              m_hManagersPanel= nullptr;
+    HWND                              m_hSolidsTree   = nullptr;  // TreeView in the Solids manager tab
     HACCEL                            m_hAccel        = nullptr;  // keyboard accelerator table
 
     std::wstring                      m_currentFile;  // path of the currently open project (empty = untitled)
