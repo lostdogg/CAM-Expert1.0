@@ -553,30 +553,46 @@ void Viewport3D::drawWireframe() {
     static constexpr float kPointSz  = 5.0f;
     static constexpr double kTwoPi   = 6.28318530717959;
 
+    // Selection highlight colour: bright gold
+    static constexpr float kSelR = 0.95f, kSelG = 0.80f, kSelB = 0.10f;
+
     glDisable(GL_LIGHTING);
     glLineWidth(1.5f);
 
-    for (const WfEntity& e : m_wfScene->entities()) {
+    const auto& entities = m_wfScene->entities();
+    for (int entityIdx = 0; entityIdx < static_cast<int>(entities.size()); ++entityIdx) {
+        const WfEntity& e = entities[entityIdx];
+        bool selected = m_wfScene->isSelected(entityIdx);
+
         switch (e.type) {
 
         case WfEntityType::Point:
-            glColor3f(1.0f, 1.0f, 0.0f);   // yellow
-            glPointSize(kPointSz);
+            glColor3f(selected ? kSelR : 1.0f,
+                      selected ? kSelG : 1.0f,
+                      selected ? kSelB : 0.0f);   // gold or yellow
+            glPointSize(selected ? kPointSz + 2.0f : kPointSz);
             glBegin(GL_POINTS);
             glVertex3d(e.p0.x, e.p0.y, e.p0.z);
             glEnd();
             break;
 
         case WfEntityType::Line:
-            glColor3f(0.0f, 1.0f, 0.8f);   // cyan
+            glColor3f(selected ? kSelR : 0.0f,
+                      selected ? kSelG : 1.0f,
+                      selected ? kSelB : 0.8f);   // gold or cyan
+            glLineWidth(selected ? 2.5f : 1.5f);
             glBegin(GL_LINES);
             glVertex3d(e.p0.x, e.p0.y, e.p0.z);
             glVertex3d(e.p1.x, e.p1.y, e.p1.z);
             glEnd();
+            glLineWidth(1.5f);
             break;
 
         case WfEntityType::Arc: {
-            glColor3f(0.6f, 1.0f, 0.2f);   // lime
+            glColor3f(selected ? kSelR : 0.6f,
+                      selected ? kSelG : 1.0f,
+                      selected ? kSelB : 0.2f);   // gold or lime
+            glLineWidth(selected ? 2.5f : 1.5f);
             glBegin(GL_LINE_STRIP);
             double span = e.endAngle - e.startAngle;
             // Ensure we always sweep the short (CCW) way around.
@@ -591,11 +607,15 @@ void Viewport3D::drawWireframe() {
                 glVertex3d(px, py, e.p0.z);
             }
             glEnd();
+            glLineWidth(1.5f);
             break;
         }
 
         case WfEntityType::Circle: {
-            glColor3f(0.6f, 1.0f, 0.2f);   // lime
+            glColor3f(selected ? kSelR : 0.6f,
+                      selected ? kSelG : 1.0f,
+                      selected ? kSelB : 0.2f);   // gold or lime
+            glLineWidth(selected ? 2.5f : 1.5f);
             glBegin(GL_LINE_LOOP);
             for (int i = 0; i < kArcSegs; ++i) {
                 double t  = kTwoPi * i / kArcSegs;
@@ -604,11 +624,15 @@ void Viewport3D::drawWireframe() {
                 glVertex3d(px, py, e.p0.z);
             }
             glEnd();
+            glLineWidth(1.5f);
             break;
         }
 
         case WfEntityType::Ellipse: {
-            glColor3f(0.8f, 0.6f, 1.0f);   // lavender
+            glColor3f(selected ? kSelR : 0.8f,
+                      selected ? kSelG : 0.6f,
+                      selected ? kSelB : 1.0f);   // gold or lavender
+            glLineWidth(selected ? 2.5f : 1.5f);
             glBegin(GL_LINE_LOOP);
             for (int i = 0; i < kArcSegs; ++i) {
                 double t  = kTwoPi * i / kArcSegs;
@@ -617,6 +641,7 @@ void Viewport3D::drawWireframe() {
                 glVertex3d(px, py, e.p0.z);
             }
             glEnd();
+            glLineWidth(1.5f);
             break;
         }
 
@@ -624,11 +649,15 @@ void Viewport3D::drawWireframe() {
             // Draw line segments between consecutive control points as a
             // polyline approximation of the spline.
             if (e.pts.size() >= 2) {
-                glColor3f(1.0f, 0.7f, 0.0f);   // orange
+                glColor3f(selected ? kSelR : 1.0f,
+                          selected ? kSelG : 0.7f,
+                          selected ? kSelB : 0.0f);   // gold or orange
+                glLineWidth(selected ? 2.5f : 1.5f);
                 glBegin(GL_LINE_STRIP);
                 for (const auto& cp : e.pts)
                     glVertex3d(cp.x, cp.y, cp.z);
                 glEnd();
+                glLineWidth(1.5f);
                 // Draw control points as small dots
                 glColor3f(1.0f, 1.0f, 1.0f);
                 glPointSize(4.0f);
@@ -642,16 +671,23 @@ void Viewport3D::drawWireframe() {
         case WfEntityType::Rectangle:
         case WfEntityType::Polygon:
             if (!e.pts.empty()) {
-                glColor3f(0.0f, 1.0f, 0.8f);   // cyan
+                glColor3f(selected ? kSelR : 0.0f,
+                          selected ? kSelG : 1.0f,
+                          selected ? kSelB : 0.8f);   // gold or cyan
+                glLineWidth(selected ? 2.5f : 1.5f);
                 glBegin(GL_LINE_LOOP);
                 for (const auto& v : e.pts)
                     glVertex3d(v.x, v.y, v.z);
                 glEnd();
+                glLineWidth(1.5f);
             }
             break;
 
         case WfEntityType::Helix: {
-            glColor3f(1.0f, 0.5f, 0.2f);   // coral
+            glColor3f(selected ? kSelR : 1.0f,
+                      selected ? kSelG : 0.5f,
+                      selected ? kSelB : 0.2f);   // gold or coral
+            glLineWidth(selected ? 2.5f : 1.5f);
             static constexpr int kHelixSegs = 32;  // segments per revolution
             int totalSegs = static_cast<int>(e.revolutions * kHelixSegs);
             if (totalSegs < 2) totalSegs = 2;
@@ -665,6 +701,7 @@ void Viewport3D::drawWireframe() {
                 glVertex3d(px, py, pz);
             }
             glEnd();
+            glLineWidth(1.5f);
             break;
         }
 

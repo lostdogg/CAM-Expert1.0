@@ -6,6 +6,8 @@
 #include <vector>
 #include <cmath>
 #include <functional>
+#include <set>
+#include <deque>
 
 // -------------------------------------------------------------------------
 // Construction Plane (Cplane) – defines the "paper" you draw on.
@@ -101,6 +103,7 @@ public:
 
     // Entity management
     void addEntity(WfEntity e);
+    void removeEntity(int index);  // remove entity at index; adjusts selection set
     void clear();
     int  entityCount() const { return static_cast<int>(m_entities.size()); }
     const std::vector<WfEntity>& entities() const { return m_entities; }
@@ -121,11 +124,38 @@ public:
     using EntityChangeCallback = std::function<void(int entityIndex)>;
     void setOnEntityChanged(EntityChangeCallback cb) { m_onEntityChanged = std::move(cb); }
 
+    // --- Entity selection ---
+    void selectEntity(int index);
+    void deselectEntity(int index);
+    void clearSelection();
+    void selectAll();
+    void selectByType(WfEntityType type);   // add all entities of given type to selection
+    bool isSelected(int index) const;
+    std::vector<int> selectedIndices() const;  // sorted ascending
+
+    // --- Undo / Redo stack ---
+    // Call pushUndoState() before any destructive edit (add/delete/paste).
+    void pushUndoState();
+    bool undo();    // returns false if nothing to undo
+    bool redo();    // returns false if nothing to redo
+    bool canUndo() const { return !m_undoStack.empty(); }
+    bool canRedo() const { return !m_redoStack.empty(); }
+    void clearUndoRedo();
+
 private:
-    std::vector<WfEntity>  m_entities;
-    CplaneType             m_cplane = CplaneType::Top;
-    double                 m_zDepth = 0.0;
-    EntityChangeCallback   m_onEntityChanged;
+    static constexpr int kMaxUndoLevels = 50;
+
+    std::vector<WfEntity>              m_entities;
+    CplaneType                         m_cplane = CplaneType::Top;
+    double                             m_zDepth = 0.0;
+    EntityChangeCallback               m_onEntityChanged;
+
+    // Selection – stores zero-based indices of selected entities
+    std::set<int>                      m_selected;
+
+    // Undo/redo – each entry is a full snapshot of m_entities
+    std::deque<std::vector<WfEntity>>  m_undoStack;
+    std::deque<std::vector<WfEntity>>  m_redoStack;
 };
 
 // -------------------------------------------------------------------------

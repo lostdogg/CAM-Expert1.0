@@ -46,10 +46,95 @@ void WireframeScene::addEntity(WfEntity e) {
         m_onEntityChanged(static_cast<int>(m_entities.size()) - 1);
 }
 
-void WireframeScene::clear() {
-    m_entities.clear();
+void WireframeScene::removeEntity(int index) {
+    if (index < 0 || index >= static_cast<int>(m_entities.size())) return;
+    m_entities.erase(m_entities.begin() + index);
+    // Rebuild selection set: drop the removed index; shift indices above it down
+    std::set<int> adjusted;
+    for (int i : m_selected) {
+        if (i < index)       adjusted.insert(i);
+        else if (i > index)  adjusted.insert(i - 1);
+        // i == index is removed from the selection
+    }
+    m_selected = std::move(adjusted);
     if (m_onEntityChanged)
         m_onEntityChanged(-1);
+}
+
+void WireframeScene::clear() {
+    m_entities.clear();
+    m_selected.clear();
+    if (m_onEntityChanged)
+        m_onEntityChanged(-1);
+}
+
+// --- Selection ---
+
+void WireframeScene::selectEntity(int index) {
+    if (index >= 0 && index < static_cast<int>(m_entities.size()))
+        m_selected.insert(index);
+}
+
+void WireframeScene::deselectEntity(int index) {
+    m_selected.erase(index);
+}
+
+void WireframeScene::clearSelection() {
+    m_selected.clear();
+}
+
+void WireframeScene::selectAll() {
+    m_selected.clear();
+    for (int i = 0; i < static_cast<int>(m_entities.size()); ++i)
+        m_selected.insert(i);
+}
+
+void WireframeScene::selectByType(WfEntityType type) {
+    for (int i = 0; i < static_cast<int>(m_entities.size()); ++i)
+        if (m_entities[i].type == type)
+            m_selected.insert(i);
+}
+
+bool WireframeScene::isSelected(int index) const {
+    return m_selected.count(index) > 0;
+}
+
+std::vector<int> WireframeScene::selectedIndices() const {
+    return std::vector<int>(m_selected.begin(), m_selected.end());
+}
+
+// --- Undo / Redo ---
+
+void WireframeScene::pushUndoState() {
+    m_undoStack.push_back(m_entities);
+    if (static_cast<int>(m_undoStack.size()) > kMaxUndoLevels)
+        m_undoStack.pop_front();
+    m_redoStack.clear();
+}
+
+bool WireframeScene::undo() {
+    if (m_undoStack.empty()) return false;
+    m_redoStack.push_back(m_entities);
+    m_entities = std::move(m_undoStack.back());
+    m_undoStack.pop_back();
+    m_selected.clear();
+    if (m_onEntityChanged) m_onEntityChanged(-1);
+    return true;
+}
+
+bool WireframeScene::redo() {
+    if (m_redoStack.empty()) return false;
+    m_undoStack.push_back(m_entities);
+    m_entities = std::move(m_redoStack.back());
+    m_redoStack.pop_back();
+    m_selected.clear();
+    if (m_onEntityChanged) m_onEntityChanged(-1);
+    return true;
+}
+
+void WireframeScene::clearUndoRedo() {
+    m_undoStack.clear();
+    m_redoStack.clear();
 }
 
 void WireframeScene::cycleCplane() {
