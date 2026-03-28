@@ -25,6 +25,7 @@ set(SOURCES
     src/cad/FileImporter.cpp
     src/cad/ModelPrep.cpp
     src/cad/FeatureRecognition.cpp
+    src/cad/WireframeScene.cpp
     src/cam/Toolpath.cpp
     src/cam/DynamicMotion.cpp
     src/cam/Strategies2D.cpp
@@ -75,6 +76,7 @@ set(HEADERS
     src/cad/FileImporter.h
     src/cad/ModelPrep.h
     src/cad/FeatureRecognition.h
+    src/cad/WireframeScene.h
     src/cam/Toolpath.h
     src/cam/DynamicMotion.h
     src/cam/Strategies2D.h

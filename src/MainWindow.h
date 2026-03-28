@@ -6,6 +6,7 @@
 #include <memory>
 #include "simulation/Verify.h"
 #include "cad/BRep.h"
+#include "cad/WireframeScene.h"
 
 // Forward declarations
 class RibbonUI;
@@ -119,6 +120,13 @@ constexpr int IDM_WF_MOD_BREAK_TWO   = 4035;  // Break Two Pieces
 constexpr int IDM_WF_MOD_BREAK_INT   = 4036;  // Break at Intersection
 constexpr int IDM_WF_MOD_JOIN        = 4037;  // Join Entities
 constexpr int IDM_WF_MOD_INTERSECT   = 4038;  // Modify at Intersection
+constexpr int IDM_WF_MOD_PROJECT     = 4039;  // Project geometry onto a plane or surface
+constexpr int IDM_WF_MOD_OFFSET      = 4040;  // Offset / Offset Chains
+constexpr int IDM_WF_MOD_ROLL        = 4041;  // Roll / Unroll around a cylinder
+
+// Wireframe construction-plane and Z-depth commands
+constexpr int IDM_WF_SET_CPLANE      = 4042;  // Cycle to next Cplane [F8]
+constexpr int IDM_WF_SET_ZDEPTH      = 4043;  // Prompt for Z-depth value [F9]
 
 // Surfaces tab commands
 constexpr int IDM_SURF_LOFT       = 4101;
@@ -282,6 +290,9 @@ private:
 
     // --- Wireframe primitive creation (Wireframe tab) ---
     void createWireframe(int commandId);
+    void wfCycleCplane();      // IDM_WF_SET_CPLANE – advance to the next Cplane
+    void wfSetZDepth();        // IDM_WF_SET_ZDEPTH – prompt for a new Z-depth value
+    void updateWfStatusBar();  // refresh the Cplane and Z-depth panels in the status bar
 
     // --- Surface creation (Surfaces tab) ---
     void surfaceLoft();           // IDM_SURF_LOFT:    loft through cross-sections
@@ -360,6 +371,9 @@ private:
     std::unique_ptr<LevelsManager>    m_levelsMgr;
     std::unique_ptr<PlanesManager>    m_planesMgr;
 
+    // Wireframe entity scene (geometry store + Cplane + Z-depth state)
+    std::unique_ptr<WireframeScene>   m_wfScene;
+
     // Copilot
     std::unique_ptr<CopilotPanel>     m_copilotPanel;
     std::unique_ptr<CopilotEngine>    m_copilotEngine;
@@ -372,6 +386,12 @@ private:
     static constexpr int STATUS_BAR_HEIGHT             = 22;
     static constexpr int SELECTION_BAR_WIDTH           = 40;  // wider for buttons
     static constexpr int COPILOT_PANEL_WIDTH           = 320; // collapsible Copilot panel
+
+    // Status bar pane indices
+    static constexpr int SB_PANE_MSG      = 0;   // main message (auto-width)
+    static constexpr int SB_PANE_CPLANE   = 1;   // Cplane name  (fixed 90 px)
+    static constexpr int SB_PANE_ZDEPTH   = 2;   // Z-depth value (fixed 110 px)
+    static constexpr int SB_PANE_SNAP     = 3;   // AutoCursor snap type (fixed 100 px)
 };
 
 #endif // MAINWINDOW_H

@@ -3,6 +3,7 @@
 #include "../managers/SolidsManager.h"
 #include "../managers/SurfacesManager.h"
 #include "../cad/BRep.h"
+#include "../cad/WireframeScene.h"
 #include <gl/gl.h>
 #include <gl/glu.h>
 #include <cmath>
@@ -52,6 +53,12 @@ void Viewport3D::setSolidsManager(const SolidsManager* mgr) {
 // --------------------------------------------------------------------------
 void Viewport3D::setSurfacesManager(const SurfacesManager* mgr) {
     m_surfacesMgr = mgr;
+    redraw();
+}
+
+// --------------------------------------------------------------------------
+void Viewport3D::setWireframeScene(const WireframeScene* scene) {
+    m_wfScene = scene;
     redraw();
 }
 
@@ -246,6 +253,7 @@ void Viewport3D::render() {
     drawStock();
     drawSolids();
     drawSurfaces();
+    drawWireframe();
     drawToolpaths();
 
     SwapBuffers(m_hDC);
@@ -532,6 +540,137 @@ void Viewport3D::drawSurfaces() {
                 glDisable(GL_BLEND);
         }
     }
+}
+
+// --------------------------------------------------------------------------
+// Draw all wireframe entities from the WireframeScene.
+// Lines are rendered in cyan-green; arcs/circles in yellow-green;
+// points as small GL_POINTS; polygons/rectangles as closed loops.
+void Viewport3D::drawWireframe() {
+    if (!m_wfScene || m_wfScene->entityCount() == 0) return;
+
+    static constexpr int   kArcSegs  = 64;   // tessellation segments per full circle
+    static constexpr float kPointSz  = 5.0f;
+    static constexpr double kTwoPi   = 6.28318530717959;
+
+    glDisable(GL_LIGHTING);
+    glLineWidth(1.5f);
+
+    for (const WfEntity& e : m_wfScene->entities()) {
+        switch (e.type) {
+
+        case WfEntityType::Point:
+            glColor3f(1.0f, 1.0f, 0.0f);   // yellow
+            glPointSize(kPointSz);
+            glBegin(GL_POINTS);
+            glVertex3d(e.p0.x, e.p0.y, e.p0.z);
+            glEnd();
+            break;
+
+        case WfEntityType::Line:
+            glColor3f(0.0f, 1.0f, 0.8f);   // cyan
+            glBegin(GL_LINES);
+            glVertex3d(e.p0.x, e.p0.y, e.p0.z);
+            glVertex3d(e.p1.x, e.p1.y, e.p1.z);
+            glEnd();
+            break;
+
+        case WfEntityType::Arc: {
+            glColor3f(0.6f, 1.0f, 0.2f);   // lime
+            glBegin(GL_LINE_STRIP);
+            double span = e.endAngle - e.startAngle;
+            // Handle wrap-around (ensure positive sweep)
+            if (span <= 0.0) span += kTwoPi;
+            for (int i = 0; i <= kArcSegs; ++i) {
+                double t = e.startAngle + span * i / kArcSegs;
+                double px = e.p0.x + e.radius * std::cos(t);
+                double py = e.p0.y + e.radius * std::sin(t);
+                glVertex3d(px, py, e.p0.z);
+            }
+            glEnd();
+            break;
+        }
+
+        case WfEntityType::Circle: {
+            glColor3f(0.6f, 1.0f, 0.2f);   // lime
+            glBegin(GL_LINE_LOOP);
+            for (int i = 0; i < kArcSegs; ++i) {
+                double t  = kTwoPi * i / kArcSegs;
+                double px = e.p0.x + e.radius * std::cos(t);
+                double py = e.p0.y + e.radius * std::sin(t);
+                glVertex3d(px, py, e.p0.z);
+            }
+            glEnd();
+            break;
+        }
+
+        case WfEntityType::Ellipse: {
+            glColor3f(0.8f, 0.6f, 1.0f);   // lavender
+            glBegin(GL_LINE_LOOP);
+            for (int i = 0; i < kArcSegs; ++i) {
+                double t  = kTwoPi * i / kArcSegs;
+                double px = e.p0.x + e.radius  * std::cos(t);
+                double py = e.p0.y + e.radius2 * std::sin(t);
+                glVertex3d(px, py, e.p0.z);
+            }
+            glEnd();
+            break;
+        }
+
+        case WfEntityType::Spline:
+            // Draw line segments between consecutive control points as a
+            // polyline approximation of the spline.
+            if (e.pts.size() >= 2) {
+                glColor3f(1.0f, 0.7f, 0.0f);   // orange
+                glBegin(GL_LINE_STRIP);
+                for (const auto& cp : e.pts)
+                    glVertex3d(cp.x, cp.y, cp.z);
+                glEnd();
+                // Draw control points as small dots
+                glColor3f(1.0f, 1.0f, 1.0f);
+                glPointSize(4.0f);
+                glBegin(GL_POINTS);
+                for (const auto& cp : e.pts)
+                    glVertex3d(cp.x, cp.y, cp.z);
+                glEnd();
+            }
+            break;
+
+        case WfEntityType::Rectangle:
+        case WfEntityType::Polygon:
+            if (!e.pts.empty()) {
+                glColor3f(0.0f, 1.0f, 0.8f);   // cyan
+                glBegin(GL_LINE_LOOP);
+                for (const auto& v : e.pts)
+                    glVertex3d(v.x, v.y, v.z);
+                glEnd();
+            }
+            break;
+
+        case WfEntityType::Helix: {
+            glColor3f(1.0f, 0.5f, 0.2f);   // coral
+            static constexpr int kHelixSegs = 32;  // segments per revolution
+            int totalSegs = static_cast<int>(e.revolutions * kHelixSegs);
+            if (totalSegs < 2) totalSegs = 2;
+            glBegin(GL_LINE_STRIP);
+            for (int i = 0; i <= totalSegs; ++i) {
+                double frac  = static_cast<double>(i) / totalSegs;
+                double angle = kTwoPi * e.revolutions * frac;
+                double px    = e.p0.x + e.radius * std::cos(angle);
+                double py    = e.p0.y + e.radius * std::sin(angle);
+                double pz    = e.p0.z + e.height * frac;
+                glVertex3d(px, py, pz);
+            }
+            glEnd();
+            break;
+        }
+
+        }  // switch
+    }  // for each entity
+
+    glLineWidth(1.0f);
+    glPointSize(1.0f);
+    glEnable(GL_LIGHTING);
 }
 
 // --------------------------------------------------------------------------

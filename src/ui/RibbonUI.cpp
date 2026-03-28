@@ -157,11 +157,14 @@ void RibbonUI::buildWireframeTab() {
     RibbonGroup modify{"Modify", {
         {IDM_WF_MOD_FILLET,    "Fillet",      "Apply a rounded radius between two intersecting entities"},
         {IDM_WF_MOD_CHAMFER,   "Chamfer",     "Apply a flat angled break between two intersecting entities"},
-        {IDM_WF_MOD_DYN_TRIM,  "Dyn Trim",   "Trim, divide, or lengthen entities dynamically"},
+        {IDM_WF_MOD_DYN_TRIM,  "Dyn Trim",   "Trim, extend, break, or divide entities dynamically"},
         {IDM_WF_MOD_BREAK_TWO, "Break 2",    "Split an entity into two pieces at a click point"},
         {IDM_WF_MOD_BREAK_INT, "Break Int",  "Break intersecting entities at their crossing points"},
         {IDM_WF_MOD_JOIN,      "Join",        "Recombine collinear lines or coincident arcs"},
-        {IDM_WF_MOD_INTERSECT, "Mod Intersect", "Break, trim, or create a point at wireframe/surface intersections"}
+        {IDM_WF_MOD_INTERSECT, "Mod Intersect", "Break, trim, or create a point at wireframe/surface intersections"},
+        {IDM_WF_MOD_PROJECT,   "Project",     "Flatten 3D geometry onto a plane or wrap it onto a surface"},
+        {IDM_WF_MOD_OFFSET,    "Offset",      "Create copies of wireframe at a specific distance (Offset Chains)"},
+        {IDM_WF_MOD_ROLL,      "Roll/Unroll", "Wrap or flatten geometry around a cylinder for rotary work"}
     }};
 
     // Transform group
@@ -485,6 +488,7 @@ static int iconShapeForId(int cmdId) {
     case IDM_WF_MOD_FILLET: case IDM_WF_MOD_CHAMFER: case IDM_WF_MOD_DYN_TRIM:
     case IDM_WF_MOD_BREAK_TWO: case IDM_WF_MOD_BREAK_INT:
     case IDM_WF_MOD_JOIN: case IDM_WF_MOD_INTERSECT:
+    case IDM_WF_MOD_PROJECT: case IDM_WF_MOD_OFFSET: case IDM_WF_MOD_ROLL:
     case IDM_SOLID_FILLET: case IDM_SOLID_CHAMFER:
     case IDM_SOLID_TRIM: case IDM_SOLID_DRAFT:
         return ISHAPE_FILLET;
