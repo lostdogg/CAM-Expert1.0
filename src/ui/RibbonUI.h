@@ -3,6 +3,7 @@
 #define RIBBON_UI_H
 
 #include <windows.h>
+#include <commctrl.h>
 #include <string>
 #include <vector>
 #include <functional>
@@ -51,7 +52,13 @@ public:
     // Notification: parent calls this when receiving WM_COMMAND
     bool handleCommand(int commandId);
 
+    // Called from the main window's WM_NOTIFY handler
+    void onNotify(LPARAM lParam);
+
     HWND hwnd() const { return m_hwnd; }
+
+    // Icon size used for all toolbar buttons
+    static constexpr int ICON_SIZE = 24;
 
 private:
     void build();
@@ -65,14 +72,28 @@ private:
     void buildCopilotTab();
 
     void addTab(RibbonTab tab);
-    void renderTab(int tabIndex);
+    void renderTab(int tabIndex);      // create a TOOLBAR + HIMAGELIST for one tab
+    void repositionToolbars();         // fit all toolbars inside the tab display area
+
+    // Programmatic icon generation
+    static HBITMAP makeToolIcon(int commandId);
+    static void    drawIconShape(HDC dc, const RECT& r, int shapeId,
+                                 COLORREF bg, COLORREF fg);
+
+    // Subclass of the ribbon container HWND to intercept TCN_SELCHANGE
+    static LRESULT CALLBACK RibbonContainerProc(HWND hwnd, UINT msg,
+                                                 WPARAM wp, LPARAM lp);
+    WNDPROC m_oldContainerProc = nullptr;
 
     HWND                     m_hwnd    = nullptr;
     HWND                     m_tabCtrl = nullptr;
-    HWND                     m_toolbar = nullptr;
     HINSTANCE                m_hInst   = nullptr;
     int                      m_activeTab = 0;
     std::vector<RibbonTab>   m_tabs;
+
+    // One toolbar + image list per tab (parallel to m_tabs)
+    std::vector<HWND>       m_toolbars;
+    std::vector<HIMAGELIST> m_imageLists;
 };
 
 #endif // RIBBON_UI_H
