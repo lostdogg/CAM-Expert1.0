@@ -303,6 +303,12 @@ private:
     // Returns true if the user confirmed a choice; fills *out* with the result.
     bool promptBodyOpType(BodyOpType& out);
 
+    // Wireframe associativity: called by the WireframeScene change callback.
+    // entityIndex is the index of the newly added entity (-1 on clear).
+    // Finds any solids whose FeatureOp references that entity and marks them
+    // in the Solids tree / status bar so the user knows a rebuild is pending.
+    void onWireframeEntityAdded(int entityIndex);
+
     // --- Wireframe primitive creation (Wireframe tab) ---
     void createWireframe(int commandId);
     void wfCycleCplane();      // IDM_WF_SET_CPLANE – advance to the next Cplane

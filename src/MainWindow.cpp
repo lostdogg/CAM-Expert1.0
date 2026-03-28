@@ -435,6 +435,13 @@ void MainWindow::onCreate() {
     // --- Wireframe scene (entity store, Cplane, Z-depth) ---
     m_wfScene = std::make_unique<WireframeScene>();
     if (m_viewport) m_viewport->setWireframeScene(m_wfScene.get());
+
+    // Wire wireframe associativity: when an entity is added to (or removed
+    // from) the scene, check whether any solid's FeatureOp references it and
+    // update the Solids tree and status bar accordingly.
+    m_wfScene->setOnEntityChanged([this](int entityIndex) {
+        onWireframeEntityAdded(entityIndex);
+    });
 }
 
 // --------------------------------------------------------------------------
@@ -1627,6 +1634,45 @@ bool MainWindow::promptBodyOpType(BodyOpType& out) {
         MB_YESNO | MB_ICONQUESTION);
     out = (r2 == IDYES) ? BodyOpType::AddBoss : BodyOpType::CutBody;
     return true;
+}
+
+// --------------------------------------------------------------------------
+// onWireframeEntityAdded – wireframe associativity callback.
+//
+// Called by WireframeScene whenever an entity is added (entityIndex >= 0)
+// or the scene is cleared (entityIndex == -1).  The method searches the
+// SolidsManager for any FeatureOp whose wfChainIdx matches the changed
+// entity index and updates the Solids tree + status bar to indicate that
+// the affected solid(s) may need to be rebuilt.
+// --------------------------------------------------------------------------
+void MainWindow::onWireframeEntityAdded(int entityIndex) {
+    if (!m_solidsMgr) return;
+
+    if (entityIndex < 0) {
+        // Scene was cleared: any solids that referenced wireframe entities
+        // lose their profile link; rebuild the tree so the "[suppressed]" /
+        // label display stays accurate.
+        buildSolidsHistoryTree();
+        return;
+    }
+
+    // Find solids whose history references this entity index.
+    std::vector<int> driven = m_solidsMgr->solidsDrivenBy(entityIndex);
+    if (driven.empty()) return;
+
+    // Rebuild the Solids tree so the status is up to date.
+    buildSolidsHistoryTree();
+
+    // Update the status bar to inform the user that associated solids may
+    // need to be re-evaluated (a full geometry kernel would trigger an
+    // automatic rebuild; here we notify the user instead).
+    std::wstring msg = L"Wireframe entity #"
+        + std::to_wstring(entityIndex)
+        + L" updated – "
+        + std::to_wstring(static_cast<int>(driven.size()))
+        + L" solid(s) reference this profile (rebuild pending).";
+    SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
+                reinterpret_cast<LPARAM>(msg.c_str()));
 }
 
 // --------------------------------------------------------------------------

@@ -42,10 +42,14 @@ Geom::Vec3 cplaneNormal(CplaneType cp) {
 
 void WireframeScene::addEntity(WfEntity e) {
     m_entities.push_back(std::move(e));
+    if (m_onEntityChanged)
+        m_onEntityChanged(static_cast<int>(m_entities.size()) - 1);
 }
 
 void WireframeScene::clear() {
     m_entities.clear();
+    if (m_onEntityChanged)
+        m_onEntityChanged(-1);
 }
 
 void WireframeScene::cycleCplane() {
