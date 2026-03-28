@@ -407,19 +407,48 @@ void MainWindow::onCreate() {
         if (m_viewport) m_viewport->redraw();
     });
 
-    // Connect the selection bar mask callback to the status bar
+    // Connect the selection bar mask callback to select wireframe entities by type
     if (m_selectionBar) {
         m_selectionBar->setMaskCallback([this](SelectMask mask) {
+            if (m_wfScene) {
+                m_wfScene->clearSelection();
+                switch (mask) {
+                case SelectMask::All:
+                    m_wfScene->selectAll();
+                    break;
+                case SelectMask::Points:
+                    m_wfScene->selectByType(WfEntityType::Point);
+                    break;
+                case SelectMask::Lines:
+                    m_wfScene->selectByType(WfEntityType::Line);
+                    break;
+                case SelectMask::Arcs:
+                    m_wfScene->selectByType(WfEntityType::Arc);
+                    m_wfScene->selectByType(WfEntityType::Circle);
+                    break;
+                case SelectMask::Splines:
+                    m_wfScene->selectByType(WfEntityType::Spline);
+                    break;
+                case SelectMask::None:
+                default:
+                    break;  // clearSelection() already called above
+                }
+                if (m_viewport) m_viewport->redraw();
+            }
             const wchar_t* names[] = {
-                L"Mask: All", L"Mask: Points", L"Mask: Lines",
-                L"Mask: Arcs", L"Mask: Splines", L"Mask: Surfaces",
-                L"Mask: Solids", L"Mask: Holes", L"Mask: Planar Faces",
-                L"Mask: None"
+                L"Mask: All",         L"Mask: Points",       L"Mask: Lines",
+                L"Mask: Arcs",        L"Mask: Splines",      L"Mask: Surfaces",
+                L"Mask: Solids",      L"Mask: Holes",        L"Mask: Planar Faces",
+                L"Mask: None (deselected)"
             };
             int idx = static_cast<int>(mask);
-            if (idx >= 0 && idx < 10)
-                SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-                    reinterpret_cast<LPARAM>(names[idx]));
+            if (idx >= 0 && idx < 10) {
+                auto sel = m_wfScene ? m_wfScene->selectedIndices() : std::vector<int>{};
+                wchar_t msg[128] = {};
+                std::swprintf(msg, 128, L"%s - %d entity(s) selected.",
+                              names[idx], static_cast<int>(sel.size()));
+                SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+            }
         });
     }
 
@@ -984,6 +1013,11 @@ void MainWindow::fileNew() {
     if (m_solidsMgr)    m_solidsMgr->clear();
     if (m_surfacesMgr)  m_surfacesMgr->clear();
     if (m_levelsMgr)    m_levelsMgr->clear();
+    if (m_wfScene) {
+        m_wfScene->clear();
+        m_wfScene->clearUndoRedo();
+    }
+    m_wfClipboard.clear();
     if (m_viewport)     m_viewport->reset();
     m_currentFile.clear();
     updateWindowTitle();
@@ -1261,38 +1295,97 @@ void MainWindow::toggleCopilotPanel() {
 
 // --------------------------------------------------------------------------
 void MainWindow::editUndo() {
-    // Placeholder: a full undo stack would be implemented in a future milestone.
+    if (!m_wfScene || !m_wfScene->canUndo()) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Undo: nothing to undo."));
+        MessageBeep(MB_ICONASTERISK);
+        return;
+    }
+    m_wfScene->undo();
+    if (m_viewport) m_viewport->redraw();
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-        reinterpret_cast<LPARAM>(L"Undo: no operations to undo."));
-    MessageBeep(MB_ICONASTERISK);
+        reinterpret_cast<LPARAM>(L"Undo: last wireframe operation reversed."));
 }
 
 // --------------------------------------------------------------------------
 void MainWindow::editRedo() {
+    if (!m_wfScene || !m_wfScene->canRedo()) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Redo: nothing to redo."));
+        MessageBeep(MB_ICONASTERISK);
+        return;
+    }
+    m_wfScene->redo();
+    if (m_viewport) m_viewport->redraw();
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-        reinterpret_cast<LPARAM>(L"Redo: no operations to redo."));
-    MessageBeep(MB_ICONASTERISK);
+        reinterpret_cast<LPARAM>(L"Redo: operation reapplied."));
 }
 
 // --------------------------------------------------------------------------
 void MainWindow::editCopy() {
-    // Placeholder: copy selected entities to the internal clipboard.
-    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-        reinterpret_cast<LPARAM>(L"Copy: select entities first."));
+    if (!m_wfScene) return;
+    auto indices = m_wfScene->selectedIndices();
+    if (indices.empty()) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(
+                L"Copy: no entities selected. Use the Selection Bar to select entities first."));
+        return;
+    }
+    m_wfClipboard.clear();
+    const auto& ents = m_wfScene->entities();
+    for (int i : indices) {
+        if (i >= 0 && i < static_cast<int>(ents.size()))
+            m_wfClipboard.push_back(ents[i]);
+    }
+    wchar_t msg[128] = {};
+    std::swprintf(msg, 128, L"Copied %d entity(s) to clipboard.",
+                  static_cast<int>(m_wfClipboard.size()));
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
 }
 
 // --------------------------------------------------------------------------
 void MainWindow::editPaste() {
-    // Placeholder: paste previously copied entities.
-    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-        reinterpret_cast<LPARAM>(L"Paste: clipboard is empty."));
+    if (m_wfClipboard.empty()) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Paste: clipboard is empty. Copy entities first (Ctrl+C)."));
+        return;
+    }
+    if (m_wfScene) {
+        m_wfScene->pushUndoState();
+        m_wfScene->clearSelection();
+        int base = m_wfScene->entityCount();
+        for (const auto& e : m_wfClipboard)
+            m_wfScene->addEntity(e);
+        // Select the newly pasted entities so they can be immediately moved
+        for (int i = 0; i < static_cast<int>(m_wfClipboard.size()); ++i)
+            m_wfScene->selectEntity(base + i);
+        if (m_viewport) m_viewport->redraw();
+    }
+    wchar_t msg[128] = {};
+    std::swprintf(msg, 128, L"Pasted %d entity(s).",
+                  static_cast<int>(m_wfClipboard.size()));
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
 }
 
 // --------------------------------------------------------------------------
 void MainWindow::editDelete() {
-    // Placeholder: delete selected entities from all managers.
-    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-        reinterpret_cast<LPARAM>(L"Delete: no entities selected."));
+    if (!m_wfScene) return;
+    auto indices = m_wfScene->selectedIndices();
+    if (indices.empty()) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(
+                L"Delete: no entities selected. Use the Selection Bar to select entities first."));
+        return;
+    }
+    m_wfScene->pushUndoState();
+    // Remove in reverse order so earlier indices remain valid
+    for (int i = static_cast<int>(indices.size()) - 1; i >= 0; --i)
+        m_wfScene->removeEntity(indices[i]);
+    if (m_viewport) m_viewport->redraw();
+    wchar_t msg[128] = {};
+    std::swprintf(msg, 128, L"Deleted %d entity(s). Press Ctrl+Z to undo.",
+                  static_cast<int>(indices.size()));
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
 }
 
 // --------------------------------------------------------------------------
@@ -1397,14 +1490,58 @@ void MainWindow::toolpathToggleDisplay() {
 
 // --------------------------------------------------------------------------
 void MainWindow::toolpathCopyParams() {
-    // Placeholder: copy parameters from the active toolpath to the clipboard.
     if (!m_toolpathMgr || m_toolpathMgr->count() == 0) {
         SendMessage(m_hStatusBar, SB_SETTEXT, 0,
             reinterpret_cast<LPARAM>(L"Copy toolpath params: no toolpaths exist."));
         return;
     }
+    // Use selected toolpath, or fall back to the last one
+    int idx = m_toolpathMgr->hasSelection()
+            ? m_toolpathMgr->selectedIndex()
+            : m_toolpathMgr->count() - 1;
+    const Toolpath&      tp = m_toolpathMgr->at(idx);
+    const CuttingParams& p  = tp.params();
+    const CuttingTool&   t  = tp.tool();
+
+    // Build a human-readable parameter block
+    char text[512] = {};
+    std::snprintf(text, sizeof(text),
+        "Operation: %s\n"
+        "Tool:      %s (%.4g mm dia, %d flutes)\n"
+        "Spindle:   %.0f RPM\n"
+        "Feed:      %.0f mm/min\n"
+        "Plunge:    %.0f mm/min\n"
+        "Axial DoC: %.4g mm\n"
+        "Radial DoC:%.4g mm\n"
+        "Stock:     %.4g mm\n",
+        tp.name().c_str(),
+        t.name.empty() ? "Tool" : t.name.c_str(),
+        t.diameter, t.numFlutes,
+        p.spindleRPM, p.feedRate, p.plungeRate,
+        p.axialDepth, p.radialDepth, p.stockAllowance);
+
+    // Place the text on the Windows clipboard as CF_UNICODETEXT.
+    // snprintf produces bytes in the system ANSI code page (CP_ACP).
+    int wlen = MultiByteToWideChar(CP_ACP, 0, text, -1, nullptr, 0);
+    if (wlen > 1 && OpenClipboard(m_hwnd)) {
+        EmptyClipboard();
+        HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE,
+                                  static_cast<SIZE_T>(wlen) * sizeof(wchar_t));
+        if (hg) {
+            wchar_t* dest = static_cast<wchar_t*>(GlobalLock(hg));
+            if (dest) {
+                MultiByteToWideChar(CP_ACP, 0, text, -1, dest, wlen);
+                GlobalUnlock(hg);
+                SetClipboardData(CF_UNICODETEXT, hg);
+            } else {
+                GlobalFree(hg);
+            }
+        }
+        CloseClipboard();
+    }
+
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
-        reinterpret_cast<LPARAM>(L"Toolpath parameters copied."));
+        reinterpret_cast<LPARAM>(L"Toolpath parameters copied to clipboard."));
 }
 
 // ==========================================================================
@@ -2576,9 +2713,19 @@ void MainWindow::createWireframe(int commandId) {
         }
     };
 
+    // Push undo state before the first entity is added in this command,
+    // so the entire command can be undone in one step.
+    bool pushedUndo = false;
+
     // Add entity to scene and refresh UI.
-    auto commit = [this](WfEntity e) {
-        if (m_wfScene) m_wfScene->addEntity(std::move(e));
+    auto commit = [this, &pushedUndo](WfEntity e) {
+        if (m_wfScene) {
+            if (!pushedUndo) {
+                m_wfScene->pushUndoState();
+                pushedUndo = true;
+            }
+            m_wfScene->addEntity(std::move(e));
+        }
         if (m_viewport) m_viewport->redraw();
         updateWfStatusBar();
     };

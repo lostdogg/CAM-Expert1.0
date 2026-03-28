@@ -381,6 +381,7 @@ private:
 
     std::wstring                      m_currentFile;  // path of the currently open project (empty = untitled)
     bool                              m_selectionMode = true;     // true=select, false=deselect (Spacebar toggle)
+    std::vector<WfEntity>             m_wfClipboard;  // internal clipboard for copy/paste of wireframe entities
 
     std::unique_ptr<RibbonUI>         m_ribbon;
     std::unique_ptr<Viewport3D>       m_viewport;
