@@ -2,6 +2,12 @@
 #include <algorithm>
 #include <cwchar>
 
+// File-scope constants
+static constexpr double kTwoPi   = 6.28318530717959;
+static constexpr double kHalfPi  = 1.57079632679490;
+static constexpr double kPi      = 3.14159265358979;
+static constexpr double k3HalfPi = 4.71238898038469;
+
 // =========================================================================
 // Cplane helpers
 // =========================================================================
@@ -123,8 +129,14 @@ void AutoCursor::collectArcSnaps(const WfEntity& e,
                            e.p0.z };
     trySnap(out, SnapType::Endpoint, startPt, cursor, tol);
     trySnap(out, SnapType::Endpoint, endPt,   cursor, tol);
-    // Midpoint of the arc
-    double midAngle = (e.startAngle + e.endAngle) * 0.5;
+    // Midpoint of the arc – handle wrap-around when endAngle < startAngle.
+    double midAngle;
+    if (e.endAngle >= e.startAngle) {
+        midAngle = (e.startAngle + e.endAngle) * 0.5;
+    } else {
+        // Arc wraps past 0: average with one full revolution offset.
+        midAngle = (e.startAngle + e.endAngle + kTwoPi) * 0.5;
+    }
     Geom::Vec3 midPt = { e.p0.x + e.radius * std::cos(midAngle),
                          e.p0.y + e.radius * std::sin(midAngle),
                          e.p0.z };
@@ -139,7 +151,7 @@ void AutoCursor::collectCircleSnaps(const WfEntity& e,
     // Center
     trySnap(out, SnapType::ArcCenter, e.p0, cursor, tol);
     // Four quadrant snap points (0°, 90°, 180°, 270°)
-    static const double angles[4] = { 0.0, 1.5707963, 3.1415926, 4.7123889 };
+    static const double angles[4] = { 0.0, kHalfPi, kPi, k3HalfPi };
     for (double a : angles) {
         Geom::Vec3 q = { e.p0.x + e.radius * std::cos(a),
                          e.p0.y + e.radius * std::sin(a),

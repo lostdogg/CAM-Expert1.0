@@ -579,8 +579,11 @@ void Viewport3D::drawWireframe() {
             glColor3f(0.6f, 1.0f, 0.2f);   // lime
             glBegin(GL_LINE_STRIP);
             double span = e.endAngle - e.startAngle;
-            // Handle wrap-around (ensure positive sweep)
-            if (span <= 0.0) span += kTwoPi;
+            // Ensure we always sweep the short (CCW) way around.
+            // When endAngle < startAngle the arc wraps past 0 radians.
+            if (span < 0.0) span += kTwoPi;
+            // Degenerate arc (start == end after wrap correction) → skip.
+            if (span < 1e-9) break;
             for (int i = 0; i <= kArcSegs; ++i) {
                 double t = e.startAngle + span * i / kArcSegs;
                 double px = e.p0.x + e.radius * std::cos(t);

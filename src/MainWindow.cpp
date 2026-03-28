@@ -2200,7 +2200,7 @@ void MainWindow::createWireframe(int commandId) {
         bumpLevel();
         // Compute arc centre from endpoints + radius (first solution).
         double mx = (x1 + x2) / 2.0, my = (y1 + y2) / 2.0;
-        double h  = std::sqrt(r * r - chord * chord / 4.0);
+        double h  = std::sqrt(std::max(0.0, r * r - chord * chord / 4.0));
         double dx = (y2 - y1) / chord, dy = -(x2 - x1) / chord;
         double cxv = mx + h * dx, cyv = my + h * dy;
         WfEntity e;
