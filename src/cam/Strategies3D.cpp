@@ -63,7 +63,7 @@ bool Strategies3D::projectOntoMesh(const MeshData& mesh,
 
     const auto& tris = mesh.triangles();
 #if defined(CAMEXPERT_USE_OPENMP)
-    double localMin = tMin;
+    double localMin = std::numeric_limits<double>::max();
     int hitInt = 0;
 #pragma omp parallel for reduction(min:localMin) reduction(|:hitInt) if(tris.size() > 1000)
     for (int i = 0; i < static_cast<int>(tris.size()); ++i) {

@@ -53,9 +53,7 @@ bool PostProcessor::loadScriptProfile(const std::string& filePath, std::string* 
 
     clearScriptProfile();
     std::string line;
-    int lineNo = 0;
     while (std::getline(f, line)) {
-        ++lineNo;
         std::string s = trim(line);
         if (s.empty() || s[0] == '#') continue;
         auto eq = s.find('=');
@@ -96,7 +94,6 @@ bool PostProcessor::loadScriptProfile(const std::string& filePath, std::string* 
     if (const auto* v = get("program_end")) { bool b = m_cfg.outputM30; if (parseBool(*v, b)) m_cfg.outputM30 = b; }
 
     m_scriptEnabled = true;
-    (void)lineNo;
     return true;
 }
 
