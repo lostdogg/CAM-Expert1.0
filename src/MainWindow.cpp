@@ -2951,15 +2951,15 @@ void MainWindow::createWireframe(int commandId) {
             return;
         }
 
-        const double x1sq = x1 * x1 + y1 * y1;
-        const double x2sq = x2 * x2 + y2 * y2;
-        const double x3sq = x3 * x3 + y3 * y3;
-        const double cx = (x1sq * (y2 - y3) +
-                           x2sq * (y3 - y1) +
-                           x3sq * (y1 - y2)) / d;
-        const double cy = (x1sq * (x3 - x2) +
-                           x2sq * (x1 - x3) +
-                           x3sq * (x2 - x1)) / d;
+        const double p1MagSq = x1 * x1 + y1 * y1;
+        const double p2MagSq = x2 * x2 + y2 * y2;
+        const double p3MagSq = x3 * x3 + y3 * y3;
+        const double cx = (p1MagSq * (y2 - y3) +
+                           p2MagSq * (y3 - y1) +
+                           p3MagSq * (y1 - y2)) / d;
+        const double cy = (p1MagSq * (x3 - x2) +
+                           p2MagSq * (x1 - x3) +
+                           p3MagSq * (x2 - x1)) / d;
         const double r = std::sqrt((x1 - cx) * (x1 - cx) + (y1 - cy) * (y1 - cy));
         if (r <= 1e-9) {
             MessageBoxW(m_hwnd, L"Arc radius must be positive.", L"Arc 3 Points", MB_OK | MB_ICONWARNING);
@@ -2999,8 +2999,9 @@ void MainWindow::createWireframe(int commandId) {
         e.startAngle = startAngle;
         e.endAngle   = endAngle;
         commit(std::move(e));
-        wchar_t msg[224] = {};
-        std::swprintf(msg, 224,
+        static constexpr std::size_t kArcMessageBufferSize = 224;
+        wchar_t msg[kArcMessageBufferSize] = {};
+        std::swprintf(msg, kArcMessageBufferSize,
                       L"Arc 3 Points: start=(%.4g,%.4g), end=(%.4g,%.4g), through=(%.4g,%.4g), R=%.4g mm",
                       x1, y1, x2, y2, x3, y3, r);
         SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
