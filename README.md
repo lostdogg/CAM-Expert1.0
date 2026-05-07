@@ -114,7 +114,7 @@ Use the **Solids Manager** side panel as a feature/history tree. You can revisit
 - **File Import**:
   - Precise geometry first: STEP (`.stp`/`.step`), IGES (`.igs`/`.iges`), Parasolid (`.x_t`/`.x_b`)
   - Mesh formats: STL (ASCII & binary), OBJ
-  - Additional connectors/stubs: 3MF/AMF, SolidWorks (`.sldprt`/`.sldasm`), AutoCAD (`.dwg`/`.dxf`), Rhino (`.3dm`), Inventor (`.ipt`/`.iam`), CATIA (`.CATPart`)
+  - Additional connectors/stubs: 3MF/AMF, SolidWorks (`.sldprt`/`.sldasm`), AutoCAD (`.dwg`/`.dxf`), Rhino (`.3dm`), Inventor (`.ipt`/`.iam`), CATIA (`.catpart`)
 - **Model Prep Engine** – fillet removal, surface healing, boundary extraction, feature classification
 - **Feature Recognition** – automatic identification of holes, pockets, bosses, and slots
 

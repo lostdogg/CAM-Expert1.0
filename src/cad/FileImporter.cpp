@@ -328,7 +328,9 @@ public:
 
     bool importFile(const std::string&, ImportResult& outResult, std::string& outMessage) const override {
         auto solid = BRep::Solid::makeBox(100.0, 50.0, 25.0);
-        solid.setName(m_name + std::string("_Stub"));
+        std::string name = m_name;
+        name += "_Stub";
+        solid.setName(name);
         outResult = solid;
         outMessage = m_hint + " (stub geometry displayed).";
         return true;
@@ -371,18 +373,18 @@ FileImporter::FileImporter() {
 
 FileFormat FileImporter::detectFormat(const std::string& filePath) {
     std::string ext = normalizeExtension(filePath);
-    if (ext == ".step" || ext == ".stp")            return FileFormat::STEP;
-    if (ext == ".iges" || ext == ".igs")            return FileFormat::IGES;
-    if (ext == ".x_t" || ext == ".x_b")             return FileFormat::Parasolid;
-    if (ext == ".stl")                               return FileFormat::STL;
-    if (ext == ".obj")                               return FileFormat::OBJ;
-    if (ext == ".3mf")                               return FileFormat::ThreeMF;
-    if (ext == ".amf")                               return FileFormat::AMF;
-    if (ext == ".sldprt" || ext == ".sldasm")       return FileFormat::SolidWorks;
-    if (ext == ".dwg" || ext == ".dxf")             return FileFormat::AutoCAD;
-    if (ext == ".3dm")                               return FileFormat::Rhino3DM;
-    if (ext == ".ipt" || ext == ".iam")             return FileFormat::Inventor;
-    if (ext == ".catpart")                           return FileFormat::CATIA;
+    if (ext == ".step" || ext == ".stp") return FileFormat::STEP;
+    if (ext == ".iges" || ext == ".igs") return FileFormat::IGES;
+    if (ext == ".x_t" || ext == ".x_b") return FileFormat::Parasolid;
+    if (ext == ".stl") return FileFormat::STL;
+    if (ext == ".obj") return FileFormat::OBJ;
+    if (ext == ".3mf") return FileFormat::ThreeMF;
+    if (ext == ".amf") return FileFormat::AMF;
+    if (ext == ".sldprt" || ext == ".sldasm") return FileFormat::SolidWorks;
+    if (ext == ".dwg" || ext == ".dxf") return FileFormat::AutoCAD;
+    if (ext == ".3dm") return FileFormat::Rhino3DM;
+    if (ext == ".ipt" || ext == ".iam") return FileFormat::Inventor;
+    if (ext == ".catpart") return FileFormat::CATIA;
     return FileFormat::Unknown;
 }
 
@@ -498,6 +500,6 @@ void FileImporter::registerDefaultImporters() {
 
 std::string FileImporter::normalizeExtension(const std::string& extOrPath) {
     if (extOrPath.empty()) return "";
-    if (!extOrPath.empty() && extOrPath[0] == '.') return toLower(extOrPath);
+    if (extOrPath[0] == '.') return toLower(extOrPath);
     return extensionFromPath(extOrPath);
 }

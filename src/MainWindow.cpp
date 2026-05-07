@@ -1237,8 +1237,8 @@ void MainWindow::fileImport() {
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner   = m_hwnd;
     ofn.lpstrFilter =
-        L"All Supported (*.step;*.stp;*.iges;*.igs;*.x_t;*.x_b;*.stl;*.obj;*.3mf;*.amf;*.dxf;*.dwg;*.sldprt;*.sldasm;*.3dm;*.ipt;*.iam;*.CATPart)\0"
-        L"*.step;*.stp;*.iges;*.igs;*.x_t;*.x_b;*.stl;*.obj;*.3mf;*.amf;*.dxf;*.dwg;*.sldprt;*.sldasm;*.3dm;*.ipt;*.iam;*.CATPart\0"
+        L"All Supported (*.step;*.stp;*.iges;*.igs;*.x_t;*.x_b;*.stl;*.obj;*.3mf;*.amf;*.dxf;*.dwg;*.sldprt;*.sldasm;*.3dm;*.ipt;*.iam;*.catpart)\0"
+        L"*.step;*.stp;*.iges;*.igs;*.x_t;*.x_b;*.stl;*.obj;*.3mf;*.amf;*.dxf;*.dwg;*.sldprt;*.sldasm;*.3dm;*.ipt;*.iam;*.catpart\0"
         L"STEP Files (*.step;*.stp)\0*.step;*.stp\0"
         L"IGES Files (*.iges;*.igs)\0*.iges;*.igs\0"
         L"Parasolid (*.x_t;*.x_b)\0*.x_t;*.x_b\0"
@@ -1249,7 +1249,7 @@ void MainWindow::fileImport() {
         L"SolidWorks (*.sldprt;*.sldasm)\0*.sldprt;*.sldasm\0"
         L"Rhino (*.3dm)\0*.3dm\0"
         L"Inventor (*.ipt;*.iam)\0*.ipt;*.iam\0"
-        L"CATIA (*.CATPart)\0*.CATPart\0"
+        L"CATIA (*.catpart)\0*.catpart\0"
         L"All Files (*.*)\0*.*\0";
     ofn.lpstrFile   = szFile;
     ofn.nMaxFile    = MAX_PATH;
