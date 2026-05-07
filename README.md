@@ -44,6 +44,37 @@ Built entirely on the Win32 API with an OpenGL 3-D viewport, CAM-Expert requires
   - **Planes Manager** – coordinate systems (WCS, Tool Plane, Construction Plane)
 - **Selection Bar & Quick Masks** – filter selections by geometry type
 
+### Wireframe quick reference
+
+The **Wireframe** tab is the primary toolkit for sketching the lines, arcs, and points that later drive toolpaths.
+
+#### 1. Points and lines
+- **Point Position** – place a coordinate node in 3D space by clicking in the graphics area or entering exact X/Y/Z values.
+- **Line Endpoints** – create a straight segment by picking the start point and end point; length or angle can be locked as needed.
+- **Line Parallel** – create a line parallel to an existing one by choosing the source line, the side, and the offset distance.
+- **Line Perpendicular** – create a line at 90° to a selected entity by choosing the base line and where the new line starts or ends.
+
+#### 2. Arcs and circles
+- **Circle Center Point** – create a round feature by picking the centre and then defining the radius or diameter.
+- **Arc 3 Points** – create an arc from a start point, an end point, and a third point that sets the curvature.
+- **Arc Tangent** – create an arc that transitions smoothly from an existing line or arc by maintaining tangency.
+
+#### 3. Shapes and polygons
+- **Rectangle** – create a rectangle from opposite corners, with the option to anchor construction from the centre.
+- **Rectangular Shapes** – create obrounds, D-shapes, or rectangles with pre-filleted corners from entered dimensions.
+- **Polygon** – create regular polygons by defining the number of sides and the size across flats or across corners.
+
+#### 4. Modification and cleanup
+- **Trim / Break / Extend** – use dynamic trim tools to keep, trim, extend, or split wireframe at the nearest intersection.
+- **Fillet Entities** – round off sharp corners by entering a radius and selecting the two intersecting entities.
+- **Chamfer Entities** – create an angled flat by entering the chamfer size and selecting the intersecting entities.
+- **Offset** – duplicate wireframe geometry at a specified distance by choosing the entity, direction, and offset value.
+
+#### 5. Advanced curves
+- **Curve on Edge** – convert a solid-model edge directly into matching wireframe geometry.
+- **Manual Spline** – create a smooth curve by defining a series of spline points or control points.
+- **Letters** – generate text as wireframe geometry for engraving by entering the text, font, and height, then placing it on the part.
+
 ### CAD / File Handling
 - **B-Rep (Boundary Representation)** solid modelling with topology awareness
 - **NURBS Surfaces** – full tensor-product NURBS with Cox-de Boor evaluation, normals, and tessellation
