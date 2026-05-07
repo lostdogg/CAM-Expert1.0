@@ -8,6 +8,7 @@
 #include <gl/glu.h>
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 // --------------------------------------------------------------------------
 Viewport3D::Viewport3D(HWND parent, HINSTANCE hInstance) {
@@ -867,7 +868,7 @@ void Viewport3D::drawSnapOverlay() {
         glBegin(GL_LINE_LOOP);
         constexpr int kSegs = 20;
         for (int i = 0; i < kSegs; ++i) {
-            double a = (2.0 * 3.14159265358979323846 * i) / kSegs;
+            double a = (2.0 * std::numbers::pi_v<double> * i) / kSegs;
             glVertex2d(x + r * std::cos(a), y + r * std::sin(a));
         }
         glEnd();
@@ -961,8 +962,11 @@ bool Viewport3D::worldPointOnConstructionPlane(int screenX, int screenY, Geom::V
 
     const double dz = wz1 - wz0;
     if (std::abs(dz) <= kRayPlaneEpsilon) {
-        out = { wx0, wy0, wz0 };
-        return true;
+        if (std::abs(wz0) <= kRayPlaneEpsilon) {
+            out = { wx0, wy0, wz0 };
+            return true;
+        }
+        return false;
     }
     const double t = -wz0 / dz;
     out = { wx0 + t * (wx1 - wx0),

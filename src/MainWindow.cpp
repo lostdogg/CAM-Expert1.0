@@ -4145,7 +4145,7 @@ void MainWindow::updateSnapDisplay(const SnapResult& snap) {
     }
 
     wchar_t txt[40] = {};
-    std::swprintf(txt, 40, L"Snap: %s", label);
+    std::swprintf(txt, sizeof(txt) / sizeof(txt[0]), L"Snap: %s", label);
     SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_SNAP,
                 reinterpret_cast<LPARAM>(txt));
 }
