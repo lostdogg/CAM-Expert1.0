@@ -212,6 +212,11 @@ static constexpr double kMmPerInch = 25.4;
 // Threshold (pixels²) below which a right-click with minimal mouse movement
 // is treated as a context-menu click rather than a pan gesture.
 static constexpr int kContextMenuThresholdSq = 25; // 5 px radius
+static constexpr std::size_t kMaxAuditEntries = 120;
+static constexpr int kMaxAuditDisplayEntries = 24;
+static constexpr int kMaxDisplayedDiagnostics = 6;
+static constexpr int kMaxDisplayedMaterials = 10;
+static constexpr int kMaxMaterialSearchResults = 20;
 
 // --------------------------------------------------------------------------
 MainWindow::MainWindow() = default;
@@ -4604,8 +4609,8 @@ void MainWindow::appendAudit(const std::wstring& message) {
     wchar_t stamp[48] = {};
     std::swprintf(stamp, 48, L"[%02d:%02d:%02d] ", st.wHour, st.wMinute, st.wSecond);
     m_operationAudit.emplace_back(std::wstring(stamp) + message);
-    if (m_operationAudit.size() > 120) {
-        const auto excess = m_operationAudit.size() - 120;
+    if (m_operationAudit.size() > kMaxAuditEntries) {
+        const auto excess = m_operationAudit.size() - kMaxAuditEntries;
         m_operationAudit.erase(
             m_operationAudit.begin(),
             m_operationAudit.begin()
@@ -4654,7 +4659,9 @@ void MainWindow::showOperationAuditTrail() {
     }
     std::wstring msg = L"Recent changes (latest first)\n\n";
     int shown = 0;
-    for (int i = static_cast<int>(m_operationAudit.size()) - 1; i >= 0 && shown < 24; --i, ++shown) {
+    for (int i = static_cast<int>(m_operationAudit.size()) - 1;
+         i >= 0 && shown < kMaxAuditDisplayEntries;
+         --i, ++shown) {
         msg += L"• " + m_operationAudit[static_cast<std::size_t>(i)] + L"\n";
     }
     MessageBoxW(m_hwnd, msg.c_str(), L"Recent Audit Trail", MB_OK | MB_ICONINFORMATION);
@@ -4905,7 +4912,7 @@ void MainWindow::setupConstraints() {
         diag += L"\nIterations: " + std::to_wstring(sr.iterations)
              +  L"\nApplied: " + std::to_wstring(sr.appliedCount)
              +  L"\nWarnings: " + std::to_wstring(static_cast<int>(sr.diagnostics.size()));
-        int maxDiag = std::min<int>(6, static_cast<int>(sr.diagnostics.size()));
+        int maxDiag = std::min<int>(kMaxDisplayedDiagnostics, static_cast<int>(sr.diagnostics.size()));
         for (int i = 0; i < maxDiag; ++i) {
             const auto& d = sr.diagnostics[static_cast<std::size_t>(i)];
             diag += L"\n- [ID " + std::to_wstring(d.constraintId) + L"] " + toWideFromUtf8(d.message);
@@ -4941,8 +4948,8 @@ void MainWindow::setupToolDatabase() {
             + L"\nMaterials: " + std::to_wstring(m_sqlToolDb.materials().size())
             + L"\nCutting rows: " + std::to_wstring(m_sqlToolDb.cuttingData().size());
         if (!m_sqlToolDb.materials().empty()) {
-            msg += L"\n\nMaterials (first 10):";
-            int n = std::min<int>(10, static_cast<int>(m_sqlToolDb.materials().size()));
+            msg += L"\n\nMaterials (first " + std::to_wstring(kMaxDisplayedMaterials) + L"):";
+            int n = std::min<int>(kMaxDisplayedMaterials, static_cast<int>(m_sqlToolDb.materials().size()));
             for (int i = 0; i < n; ++i)
                 msg += L"\n- " + toWideFromUtf8(m_sqlToolDb.materials()[static_cast<std::size_t>(i)].key);
         }
@@ -4962,7 +4969,7 @@ void MainWindow::setupToolDatabase() {
         for (const auto& m : m_sqlToolDb.materials()) {
             if (static_cast<int>(m.material.matClass) == cls) {
                 msg += L"- " + toWideFromUtf8(m.key) + L"\n";
-                if (++matches >= 20) break;
+                if (++matches >= kMaxMaterialSearchResults) break;
             }
         }
         if (matches == 0) msg += L"(none)";
