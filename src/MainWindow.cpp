@@ -4909,8 +4909,7 @@ void MainWindow::surfaceFence()
     }
 
     // Direction vector from angle (in XZ-plane)
-    const double pi = 3.14159265358979323846;
-    double rad = angle * pi / 180.0;
+    double rad = angle * (kSurfPi / 180.0);
     Geom::Vec3 dir{ std::cos(rad), 0.0, std::sin(rad) };
 
     static int fenceCount = 0;
@@ -4940,7 +4939,7 @@ void MainWindow::surfaceDraft()
         return;
 
     if (std::abs(draftAngle) < 0.01 || wallHeight <= 0) {
-        MessageBoxW(m_hwnd, L"Draft angle and height must be non-zero.",
+        MessageBoxW(m_hwnd, L"Draft angle must be non-zero and height must be positive.",
                     L"Create Draft Surface", MB_OK | MB_ICONWARNING);
         return;
     }

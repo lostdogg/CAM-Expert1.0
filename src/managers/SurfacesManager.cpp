@@ -388,8 +388,8 @@ NurbsSurface SurfacesManager::makeFillet(const NurbsSurface& srf1,
 // --------------------------------------------------------------------------
 // makeFlat – flat bilinear surface of `width` × `depth` centred at the origin
 //
-// A degree-1 bicubic NURBS (bilinear) with four corner control points lying
-// in the XY-plane.  This represents the simplest "Flat Boundary" surface.
+// A bilinear NURBS (degree 1 in both directions) with four corner control points
+// lying in the XY-plane.  This represents the simplest "Flat Boundary" surface.
 // --------------------------------------------------------------------------
 NurbsSurface SurfacesManager::makeFlat(double width, double depth)
 {
@@ -539,8 +539,7 @@ NurbsSurface SurfacesManager::makeDraft(
     cx *= inv;  cy *= inv;
 
     // Draft offset: at height H, each point moves outward by H * tan(angle)
-    const double pi = 3.14159265358979323846;
-    double tanAngle = std::tan(draftAngleDeg * pi / 180.0);
+    double tanAngle = std::tan(draftAngleDeg * (3.14159265358979323846 / 180.0));
     double lateralOffset = height * tanAngle;
 
     std::vector<Geom::Vec3> topCurve;
