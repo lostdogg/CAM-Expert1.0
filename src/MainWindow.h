@@ -182,8 +182,17 @@ constexpr int IDM_PREP_CLASSIFY   = 4304;
 constexpr int IDM_PREP_DRAFT      = 4305;
 constexpr int IDM_PREP_SPLIT      = 4306;
 
+// Unit and context-menu command IDs
+constexpr int IDM_UNIT_TOGGLE         = 7001;  // Toggle metric / imperial
+
+// Viewport right-click context-menu command IDs
+constexpr int IDM_CTX_FIT             = 7100;  // Fit to Screen
+constexpr int IDM_CTX_ISO             = 7101;  // Isometric View
+constexpr int IDM_CTX_FRONT           = 7102;  // Front View
+constexpr int IDM_CTX_TOP             = 7103;  // Top View
+constexpr int IDM_CTX_RIGHT           = 7104;  // Right View
+constexpr int IDM_CTX_CLEAR_COLORS    = 7105;  // Clear Colors (reset entity colours)
 constexpr int IDM_HELP_ABOUT      = 9001;
-constexpr int IDM_COPILOT_TOGGLE  = 9002;
 constexpr int IDM_HELP_TOPICS     = 9003;  // F1 – Open help topics
 
 // Edit menu command IDs
@@ -369,6 +378,14 @@ private:
                       const wchar_t* label2, double defVal2, double& out2,
                       const wchar_t* label3, double defVal3, double& out3);
 
+    // --- Unit / coordinate display ---
+    void unitToggle();                                         // IDM_UNIT_TOGGLE
+    void updateCoordinateDisplay(double x, double y, double z);// update X/Y/Z status bar panes
+    void updateUnitPane();                                     // refresh the unit pane text
+
+    // --- Right-click context menu ---
+    void showViewportContextMenu(int screenX, int screenY);    // spawn context popup
+
     // Return a pointer to the most recently added (active) solid, or nullptr.
     BRep::Solid* activeSolid();
 
@@ -382,6 +399,7 @@ private:
 
     std::wstring                      m_currentFile;  // path of the currently open project (empty = untitled)
     bool                              m_selectionMode = true;     // true=select, false=deselect (Spacebar toggle)
+    bool                              m_useMetric     = true;     // true = mm, false = inches
     std::vector<WfEntity>             m_wfClipboard;  // internal clipboard for copy/paste of wireframe entities
 
     std::unique_ptr<RibbonUI>         m_ribbon;
@@ -408,15 +426,19 @@ private:
     static constexpr int MANAGERS_PANEL_WIDTH          = 280;
     static constexpr int RIBBON_HEIGHT                 = 100;
     static constexpr int STATUS_BAR_HEIGHT             = 22;
-    static constexpr int SELECTION_BAR_WIDTH           = 40;  // wider for buttons
+    static constexpr int SELECTION_BAR_HEIGHT          = 28;  // horizontal bar above viewport
     static constexpr int COPILOT_PANEL_WIDTH           = 320; // collapsible Copilot panel
     static constexpr COLORREF FRAME_BACKGROUND_COLOR   = RGB(0x17, 0x1B, 0x22);
 
     // Status bar pane indices
     static constexpr int SB_PANE_MSG      = 0;   // main message (auto-width)
     static constexpr int SB_PANE_CPLANE   = 1;   // Cplane name  (fixed 90 px)
-    static constexpr int SB_PANE_ZDEPTH   = 2;   // Z-depth value (fixed 110 px)
-    static constexpr int SB_PANE_SNAP     = 3;   // AutoCursor snap type (fixed 100 px)
+    static constexpr int SB_PANE_ZDEPTH   = 2;   // Z-depth value (fixed 80 px)
+    static constexpr int SB_PANE_SNAP     = 3;   // AutoCursor snap type (fixed 80 px)
+    static constexpr int SB_PANE_COORD_X  = 4;   // Cursor world X (fixed 80 px)
+    static constexpr int SB_PANE_COORD_Y  = 5;   // Cursor world Y (fixed 80 px)
+    static constexpr int SB_PANE_COORD_Z  = 6;   // Cursor world Z (fixed 80 px)
+    static constexpr int SB_PANE_UNIT     = 7;   // Unit toggle: "mm" or "in" (fixed 50 px)
 };
 
 #endif // MAINWINDOW_H

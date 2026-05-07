@@ -115,14 +115,20 @@ void SelectionBar::createButtons() {
 
 // --------------------------------------------------------------------------
 void SelectionBar::layoutButtons(int width, int height) {
-    // Buttons fill the full width, stacked vertically
+    // Horizontal bar (above the canvas): buttons side by side, full bar height.
+    // Vertical bar (legacy side strip): buttons stacked, full bar width.
+    bool horizontal = (width > height);
     for (int i = 0; i < static_cast<int>(m_buttons.size()); ++i) {
         auto idx = static_cast<std::size_t>(i);
         if (!m_buttons[idx].hwnd) continue;
-        SetWindowPos(m_buttons[idx].hwnd, nullptr,
-            0, i * BTN_HEIGHT, width, BTN_HEIGHT, SWP_NOZORDER);
+        if (horizontal) {
+            SetWindowPos(m_buttons[idx].hwnd, nullptr,
+                i * BTN_WIDTH, 0, BTN_WIDTH, height, SWP_NOZORDER);
+        } else {
+            SetWindowPos(m_buttons[idx].hwnd, nullptr,
+                0, i * BTN_HEIGHT, width, BTN_HEIGHT, SWP_NOZORDER);
+        }
     }
-    (void)height;
 }
 
 // --------------------------------------------------------------------------
