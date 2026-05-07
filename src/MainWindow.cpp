@@ -2374,7 +2374,7 @@ void MainWindow::solidModify(int commandId) {
         m_solidsMgr->addFeature(solidIdx, op);
         SendMessage(m_hStatusBar, SB_SETTEXT, 0,
             reinterpret_cast<LPARAM>(
-                L"Trim Solid: select a plane, surface, or solid sheet to use as the cutting tool."));
+                L"Trim to Plane: select a solid, then choose the plane or surface used as the cutting tool."));
         break;
     }
 
@@ -2747,7 +2747,6 @@ void MainWindow::createWireframe(int commandId) {
     };
 
     static constexpr double kTwoPi    = 6.28318530717959;
-    static constexpr double kDegToRad = 0.01745329251994;
 
     switch (commandId) {
 
@@ -2929,29 +2928,82 @@ void MainWindow::createWireframe(int commandId) {
     }
 
     case IDM_WF_ARC: {
-        double cx = 0, cy = 0, r = 25.0;
-        if (!promptTriple(L"Create Arc",
-                          L"Centre X (mm):", cx, cx,
-                          L"Centre Y (mm):", cy, cy,
-                          L"Radius  (mm):", r,  r)) return;
-        double startDeg = 0, endDeg = 90;
-        if (!promptDouble2(L"Create Arc - Angles",
-                           L"Start angle (deg):", startDeg, startDeg,
-                           L"End angle   (deg):", endDeg,   endDeg)) return;
-        if (r <= 0) {
-            MessageBoxW(m_hwnd, L"Radius must be positive.", L"Create Arc", MB_OK | MB_ICONWARNING);
+        double x1 = 0.0, y1 = 0.0;
+        double x2 = 50.0, y2 = 0.0;
+        double x3 = 25.0, y3 = 25.0;
+        if (!promptDouble2(L"Arc 3 Points - Start Point",
+                           L"X (mm):", x1, x1,
+                           L"Y (mm):", y1, y1)) return;
+        if (!promptDouble2(L"Arc 3 Points - End Point",
+                           L"X (mm):", x2, x2,
+                           L"Y (mm):", y2, y2)) return;
+        if (!promptDouble2(L"Arc 3 Points - Curvature Point",
+                           L"X (mm):", x3, x3,
+                           L"Y (mm):", y3, y3)) return;
+
+        // Circumcircle determinant for the three input points.
+        const double d = 2.0 * (x1 * (y2 - y3) +
+                                x2 * (y3 - y1) +
+                                x3 * (y1 - y2));
+        if (std::abs(d) < 1e-9) {
+            MessageBoxW(m_hwnd,
+                        L"The three points are collinear; an arc cannot be created.",
+                        L"Arc 3 Points", MB_OK | MB_ICONWARNING);
             return;
         }
+
+        const double p1MagSq = x1 * x1 + y1 * y1;
+        const double p2MagSq = x2 * x2 + y2 * y2;
+        const double p3MagSq = x3 * x3 + y3 * y3;
+        const double cx = (p1MagSq * (y2 - y3) +
+                           p2MagSq * (y3 - y1) +
+                           p3MagSq * (y1 - y2)) / d;
+        const double cy = (p1MagSq * (x3 - x2) +
+                           p2MagSq * (x1 - x3) +
+                           p3MagSq * (x2 - x1)) / d;
+        const double r = std::sqrt((x1 - cx) * (x1 - cx) + (y1 - cy) * (y1 - cy));
+        if (r <= 1e-9) {
+            MessageBoxW(m_hwnd, L"Arc radius must be positive.", L"Arc 3 Points", MB_OK | MB_ICONWARNING);
+            return;
+        }
+
+        auto normalizeAngle = [kTwoPi](double a) {
+            a = std::fmod(a, kTwoPi);
+            if (a < 0.0) a += kTwoPi;
+            return a;
+        };
+        auto ccwSpan = [kTwoPi](double start, double end) {
+            double span = std::fmod(end - start, kTwoPi);
+            if (span < 0.0) span += kTwoPi;
+            return span;
+        };
+
+        const double a1 = normalizeAngle(std::atan2(y1 - cy, x1 - cx));
+        const double a2 = normalizeAngle(std::atan2(y2 - cy, x2 - cx));
+        const double a3 = normalizeAngle(std::atan2(y3 - cy, x3 - cx));
+
+        double startAngle = a1;
+        double endAngle = a2;
+        const double spanToEnd = ccwSpan(a1, a2);
+        const double spanToMid = ccwSpan(a1, a3);
+        if (spanToMid > spanToEnd) {
+            startAngle = a2;
+            endAngle = a1;
+        }
+
         bumpLevel();
         WfEntity e;
         e.type       = WfEntityType::Arc;
         e.p0         = m_wfScene ? m_wfScene->toWorld(cx, cy) : Geom::Vec3{cx, cy, 0};
         e.radius     = r;
-        e.startAngle = startDeg * kDegToRad;
-        e.endAngle   = endDeg   * kDegToRad;
+        e.startAngle = startAngle;
+        e.endAngle   = endAngle;
         commit(std::move(e));
-        wchar_t msg[160] = {};
-        std::swprintf(msg, 160, L"Arc created: R=%.4g mm, %.4g deg->%.4g deg", r, startDeg, endDeg);
+        static constexpr std::size_t kArcMessageBufferSize = 224;
+        wchar_t msg[kArcMessageBufferSize] = {};
+        std::swprintf(msg, kArcMessageBufferSize,
+                      L"Arc 3 Points: start=(%.4g,%.4g), end=(%.4g,%.4g), through=(%.4g,%.4g), R=%.4g mm",
+                      x1, y1, x2, y2, x3, y3, r);
         SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }

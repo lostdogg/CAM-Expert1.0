@@ -44,6 +44,64 @@ Built entirely on the Win32 API with an OpenGL 3-D viewport, CAM-Expert requires
   - **Planes Manager** – coordinate systems (WCS, Tool Plane, Construction Plane)
 - **Selection Bar & Quick Masks** – filter selections by geometry type
 
+### Wireframe quick reference
+
+The **Wireframe** tab is the primary toolkit for sketching the lines, arcs, and points that later drive toolpaths.
+
+#### 1. Points and lines
+- **Point Position** – place a coordinate node in 3D space by clicking in the graphics area or entering exact X/Y/Z values.
+- **Line Endpoints** – create a straight segment by picking the start point and end point; length or angle can be locked as needed.
+- **Line Parallel** – create a line parallel to an existing one by choosing the source line, the side, and the offset distance.
+- **Line Perpendicular** – create a line at 90° to a selected entity by choosing the base line and where the new line starts or ends.
+
+#### 2. Arcs and circles
+- **Circle Center Point** – create a round feature by picking the centre and then defining the radius or diameter.
+- **Arc 3 Points** – create an arc from a start point, an end point, and a third point that sets the curvature.
+- **Arc Tangent** – create an arc that transitions smoothly from an existing line or arc by maintaining tangency.
+
+#### 3. Shapes and polygons
+- **Rectangle** – create a rectangle from opposite corners, with the option to anchor construction from the centre.
+- **Rectangular Shapes** – create obrounds, D-shapes, or rectangles with pre-filleted corners from entered dimensions.
+- **Polygon** – create regular polygons by defining the number of sides and the size across flats or across corners.
+
+#### 4. Modification and cleanup
+- **Trim / Break / Extend** – use dynamic trim tools to keep, trim, extend, or split wireframe at the nearest intersection.
+- **Fillet Entities** – round off sharp corners by entering a radius and selecting the two intersecting entities.
+- **Chamfer Entities** – create an angled flat by entering the chamfer size and selecting the intersecting entities.
+- **Offset** – duplicate wireframe geometry at a specified distance by choosing the entity, direction, and offset value.
+
+#### 5. Advanced curves
+- **Curve on Edge** – convert a solid-model edge directly into matching wireframe geometry.
+- **Manual Spline** – create a smooth curve by defining a series of spline points or control points.
+- **Letters** – generate text as wireframe geometry for engraving by entering the text, font, and height, then placing it on the part.
+
+### Solids quick reference
+
+The **Solids** tab is where 2D wireframe sketches become 3D volume representing the material to machine.
+
+#### 1. Primary creation tools
+- **Extrude** – push a closed wireframe chain into the third dimension to create a solid body or cut material.
+- **Revolve** – spin a wireframe profile around a centre axis to build cylindrical or conical bodies.
+- **Sweep** – move a profile cross-section along a selected path curve.
+- **Loft** – blend two or more wireframe chains to skin a smooth transition between them.
+
+#### 2. Refining the solid
+- **Constant Fillet** – round sharp edges by entering a radius and selecting target edges or faces.
+- **Chamfer** – create a flat angled edge break from entered distances or angle settings.
+- **Shell** – hollow a body by selecting an opening face and setting wall thickness.
+
+#### 3. Boolean operations
+- **Boolean Add** – merge target and tool solids into one body.
+- **Boolean Remove (Subtract)** – carve material from a target using one or more tool solids.
+- **Boolean Common (Intersect)** – keep only the overlapping volume between selected solids.
+
+#### 4. Advanced modification
+- **Thicken** – convert a thin surface into a solid by applying thickness.
+- **Trim to Plane** – cut a solid using a plane or surface and keep the required side.
+- **Remove Faces** – remove selected feature faces (for example holes or fillets) and heal the surrounding area during model-prep cleanup.
+
+Use the **Solids Manager** side panel as a feature/history tree. You can revisit operations such as extrusion height, fillet radius, shell thickness, and boolean intent without redrawing the model.
+
 ### CAD / File Handling
 - **B-Rep (Boundary Representation)** solid modelling with topology awareness
 - **NURBS Surfaces** – full tensor-product NURBS with Cox-de Boor evaluation, normals, and tessellation
