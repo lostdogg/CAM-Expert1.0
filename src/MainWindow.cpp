@@ -158,10 +158,18 @@ static constexpr double kPi = 3.14159265358979323846;
 
 // --------------------------------------------------------------------------
 MainWindow::MainWindow() = default;
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow() {
+    if (m_backgroundBrush) {
+        DeleteObject(m_backgroundBrush);
+        m_backgroundBrush = nullptr;
+    }
+}
 
 // --------------------------------------------------------------------------
 bool MainWindow::create(HINSTANCE hInstance) {
+    if (!m_backgroundBrush)
+        m_backgroundBrush = CreateSolidBrush(FRAME_BACKGROUND_COLOR);
+
     // Register the window class
     WNDCLASSEXW wc{};
     wc.cbSize        = sizeof(wc);
@@ -170,7 +178,7 @@ bool MainWindow::create(HINSTANCE hInstance) {
     wc.hInstance     = hInstance;
     wc.hIcon         = LoadIcon(nullptr, IDI_APPLICATION);
     wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    wc.hbrBackground = m_backgroundBrush;
     wc.lpszClassName = CLASS_NAME;
     wc.hIconSm       = LoadIcon(nullptr, IDI_APPLICATION);
 
@@ -310,6 +318,14 @@ LRESULT MainWindow::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_PAINT:
         onPaint();
         return 0;
+
+    case WM_ERASEBKGND: {
+        HDC hdc = reinterpret_cast<HDC>(wParam);
+        RECT rc{};
+        GetClientRect(m_hwnd, &rc);
+        FillRect(hdc, &rc, m_backgroundBrush);
+        return 1;
+    }
 
     case WM_DESTROY:
         onDestroy();

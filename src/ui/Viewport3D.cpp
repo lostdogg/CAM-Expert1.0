@@ -112,7 +112,7 @@ bool Viewport3D::initOpenGL() {
     glLightfv(GL_LIGHT1, GL_SPECULAR, fillSpecular);
     glLightfv(GL_LIGHT1, GL_POSITION, fillPos);
 
-    glClearColor(0.16f, 0.17f, 0.21f, 1.0f); // deep blue-grey background
+    glClearColor(0.08f, 0.11f, 0.19f, 1.0f); // fallback clear under gradient
 
     return true;
 }
@@ -222,6 +222,7 @@ void Viewport3D::render() {
     wglMakeCurrent(m_hDC, m_hGLRC);
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    drawBackground();
     glLoadIdentity();
 
     // Camera transform
@@ -260,6 +261,38 @@ void Viewport3D::render() {
 }
 
 // --------------------------------------------------------------------------
+void Viewport3D::drawBackground() {
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+
+    glBegin(GL_QUADS);
+    glColor3f(0.08f, 0.11f, 0.19f);
+    glVertex2f(-1.0f,  1.0f);
+    glVertex2f( 1.0f,  1.0f);
+    glColor3f(0.20f, 0.28f, 0.42f);
+    glVertex2f( 1.0f, -1.0f);
+    glVertex2f(-1.0f, -1.0f);
+    glEnd();
+
+    glEnable(GL_DEPTH_TEST);
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
+// --------------------------------------------------------------------------
 // Viewport visualization constants
 static constexpr int   kGridHighlightInterval = 5;     // every Nth grid line is brighter
 static constexpr float kMinAxisLength         = 0.5f;  // minimum length to treat toolAxis as valid
@@ -269,14 +302,15 @@ static constexpr int   kAxisTickInterval      = 10;    // draw a tick every N to
 // --------------------------------------------------------------------------
 void Viewport3D::drawGrid() {
     glDisable(GL_LIGHTING);
-    glColor3f(0.30f, 0.30f, 0.30f);
     glLineWidth(1.0f);
     glBegin(GL_LINES);
     for (int i = -20; i <= 20; ++i) {
         float fi = static_cast<float>(i) * 10.0f;
         // Highlight every kGridHighlightInterval-th line slightly brighter
-        float bright = (i % kGridHighlightInterval == 0) ? 0.45f : 0.30f;
-        glColor3f(bright, bright, bright);
+        if (i % kGridHighlightInterval == 0)
+            glColor3f(0.28f, 0.30f, 0.40f);
+        else
+            glColor3f(0.18f, 0.20f, 0.28f);
         glVertex3f(fi, -200, 0); glVertex3f(fi, 200, 0);
         glVertex3f(-200, fi, 0); glVertex3f(200, fi, 0);
     }
@@ -287,14 +321,37 @@ void Viewport3D::drawGrid() {
 // --------------------------------------------------------------------------
 void Viewport3D::drawAxes() {
     glDisable(GL_LIGHTING);
-    glLineWidth(2.5f);
+    glLineWidth(3.0f);
     glBegin(GL_LINES);
     // X – red
-    glColor3f(1.0f, 0.2f, 0.2f); glVertex3f(0,0,0); glVertex3f(40,0,0);
+    glColor3f(1.0f, 0.18f, 0.18f); glVertex3f(0,0,0); glVertex3f(40,0,0);
     // Y – green
-    glColor3f(0.2f, 1.0f, 0.2f); glVertex3f(0,0,0); glVertex3f(0,40,0);
+    glColor3f(0.10f, 0.95f, 0.22f); glVertex3f(0,0,0); glVertex3f(0,40,0);
     // Z – blue
-    glColor3f(0.2f, 0.4f, 1.0f); glVertex3f(0,0,0); glVertex3f(0,0,40);
+    glColor3f(0.18f, 0.45f, 1.0f); glVertex3f(0,0,0); glVertex3f(0,0,40);
+    glEnd();
+
+    constexpr float axisTip = 40.0f;
+    constexpr float headBase = 34.0f;
+    constexpr float headHalf = 1.8f;
+    glBegin(GL_TRIANGLES);
+    glColor3f(1.0f, 0.18f, 0.18f);
+    glVertex3f(axisTip, 0.0f, 0.0f); glVertex3f(headBase,  headHalf,  headHalf); glVertex3f(headBase, -headHalf,  headHalf);
+    glVertex3f(axisTip, 0.0f, 0.0f); glVertex3f(headBase, -headHalf,  headHalf); glVertex3f(headBase, -headHalf, -headHalf);
+    glVertex3f(axisTip, 0.0f, 0.0f); glVertex3f(headBase, -headHalf, -headHalf); glVertex3f(headBase,  headHalf, -headHalf);
+    glVertex3f(axisTip, 0.0f, 0.0f); glVertex3f(headBase,  headHalf, -headHalf); glVertex3f(headBase,  headHalf,  headHalf);
+
+    glColor3f(0.10f, 0.95f, 0.22f);
+    glVertex3f(0.0f, axisTip, 0.0f); glVertex3f( headHalf, headBase,  headHalf); glVertex3f( headHalf, headBase, -headHalf);
+    glVertex3f(0.0f, axisTip, 0.0f); glVertex3f( headHalf, headBase, -headHalf); glVertex3f(-headHalf, headBase, -headHalf);
+    glVertex3f(0.0f, axisTip, 0.0f); glVertex3f(-headHalf, headBase, -headHalf); glVertex3f(-headHalf, headBase,  headHalf);
+    glVertex3f(0.0f, axisTip, 0.0f); glVertex3f(-headHalf, headBase,  headHalf); glVertex3f( headHalf, headBase,  headHalf);
+
+    glColor3f(0.18f, 0.45f, 1.0f);
+    glVertex3f(0.0f, 0.0f, axisTip); glVertex3f( headHalf,  headHalf, headBase); glVertex3f(-headHalf,  headHalf, headBase);
+    glVertex3f(0.0f, 0.0f, axisTip); glVertex3f(-headHalf,  headHalf, headBase); glVertex3f(-headHalf, -headHalf, headBase);
+    glVertex3f(0.0f, 0.0f, axisTip); glVertex3f(-headHalf, -headHalf, headBase); glVertex3f( headHalf, -headHalf, headBase);
+    glVertex3f(0.0f, 0.0f, axisTip); glVertex3f( headHalf, -headHalf, headBase); glVertex3f( headHalf,  headHalf, headBase);
     glEnd();
     glLineWidth(1.0f);
     glEnable(GL_LIGHTING);
@@ -305,12 +362,12 @@ void Viewport3D::drawAxes() {
 void Viewport3D::drawStock() {
     if (m_renderMode == RenderMode::Wireframe) {
         glDisable(GL_LIGHTING);
-        glColor3f(0.5f, 0.5f, 0.7f);
+        glColor3f(0.60f, 0.63f, 0.68f);
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     } else {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glColor4f(0.55f, 0.55f, 0.75f,
+        glColor4f(0.60f, 0.63f, 0.68f,
                   m_renderMode == RenderMode::Translucent ? 0.35f : 0.80f);
         glEnable(GL_LIGHTING);
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
@@ -383,7 +440,7 @@ void Viewport3D::drawSolids() {
                 glColor4f(0.85f, 0.65f, 0.15f,
                           m_renderMode == RenderMode::Translucent ? 0.50f : 0.90f);
             else
-                glColor4f(0.55f, 0.65f, 0.80f,
+                glColor4f(0.52f, 0.64f, 0.80f,
                           m_renderMode == RenderMode::Translucent ? 0.40f : 0.85f);
 
             for (const auto& face : faces) {
@@ -421,7 +478,7 @@ void Viewport3D::drawSolids() {
         else if (entry.selected)
             glColor3f(0.95f, 0.75f, 0.10f);  // gold silhouette when selected
         else
-            glColor3f(0.30f, 0.35f, 0.50f);  // dark edge overlay in shaded mode
+            glColor3f(0.35f, 0.40f, 0.58f);  // dark edge overlay in shaded mode
 
         glBegin(GL_LINES);
         for (const auto& edge : edges) {

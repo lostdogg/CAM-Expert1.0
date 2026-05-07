@@ -378,6 +378,7 @@ private:
     HWND                              m_hManagersPanel= nullptr;
     HWND                              m_hSolidsTree   = nullptr;  // TreeView in the Solids manager tab
     HACCEL                            m_hAccel        = nullptr;  // keyboard accelerator table
+    HBRUSH                            m_backgroundBrush = nullptr;
 
     std::wstring                      m_currentFile;  // path of the currently open project (empty = untitled)
     bool                              m_selectionMode = true;     // true=select, false=deselect (Spacebar toggle)
@@ -409,6 +410,7 @@ private:
     static constexpr int STATUS_BAR_HEIGHT             = 22;
     static constexpr int SELECTION_BAR_WIDTH           = 40;  // wider for buttons
     static constexpr int COPILOT_PANEL_WIDTH           = 320; // collapsible Copilot panel
+    static constexpr COLORREF FRAME_BACKGROUND_COLOR   = RGB(0x17, 0x1B, 0x22);
 
     // Status bar pane indices
     static constexpr int SB_PANE_MSG      = 0;   // main message (auto-width)

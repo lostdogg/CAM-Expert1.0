@@ -551,16 +551,16 @@ static int iconShapeForId(int cmdId) {
 }
 
 static COLORREF iconBgForId(int cmdId) {
-    if (cmdId >= 1000 && cmdId < 2000) return RGB(0x20, 0x50, 0x90); // File/Edit – blue
-    if (cmdId >= 2000 && cmdId < 3000) return RGB(0x80, 0x40, 0x00); // Machine  – orange
-    if (cmdId >= 3000 && cmdId < 4000) return RGB(0x30, 0x30, 0x50); // View     – slate
-    if (cmdId >= 4000 && cmdId < 4100) return RGB(0x10, 0x60, 0x20); // Wireframe– green
-    if (cmdId >= 4100 && cmdId < 4200) return RGB(0x00, 0x50, 0x60); // Surfaces – teal
-    if (cmdId >= 4200 && cmdId < 4300) return RGB(0x40, 0x10, 0x80); // Solids   – purple
-    if (cmdId >= 4300 && cmdId < 4400) return RGB(0x60, 0x30, 0x10); // Prep     – brown
-    if (cmdId >= 5000 && cmdId < 6000) return RGB(0x20, 0x30, 0x80); // Edit     – dark blue
-    if (cmdId >= 6000 && cmdId < 7000) return RGB(0x70, 0x20, 0x30); // Transform– dark red
-    if (cmdId >= 9000 && cmdId < 9100) return RGB(0x10, 0x10, 0x40); // Copilot  – indigo
+    if (cmdId >= 1000 && cmdId < 2000) return RGB(0x1A, 0x42, 0x80); // File/Edit – cobalt
+    if (cmdId >= 2000 && cmdId < 3000) return RGB(0x72, 0x38, 0x00); // Machine  – amber
+    if (cmdId >= 3000 && cmdId < 4000) return RGB(0x22, 0x28, 0x45); // View     – slate
+    if (cmdId >= 4000 && cmdId < 4100) return RGB(0x0E, 0x52, 0x1C); // Wireframe– forest
+    if (cmdId >= 4100 && cmdId < 4200) return RGB(0x00, 0x42, 0x58); // Surfaces – teal
+    if (cmdId >= 4200 && cmdId < 4300) return RGB(0x3C, 0x0C, 0x7A); // Solids   – violet
+    if (cmdId >= 4300 && cmdId < 4400) return RGB(0x58, 0x2A, 0x0C); // Prep     – brown
+    if (cmdId >= 5000 && cmdId < 6000) return RGB(0x16, 0x26, 0x72); // Edit     – navy
+    if (cmdId >= 6000 && cmdId < 7000) return RGB(0x62, 0x16, 0x28); // Transform– crimson
+    if (cmdId >= 9000 && cmdId < 9100) return RGB(0x08, 0x0A, 0x3E); // Copilot  – indigo
     return RGB(0x30, 0x30, 0x30);
 }
 
@@ -1010,4 +1010,3 @@ LRESULT CALLBACK RibbonUI::RibbonContainerProc(HWND hwnd, UINT msg,
         return CallWindowProcW(self->m_oldContainerProc, hwnd, msg, wp, lp);
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
-
