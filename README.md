@@ -1,6 +1,6 @@
 # CAM-Expert 1.2
 
-**CAM-Expert** is a comprehensive Computer-Aided Manufacturing (CAM) and Computer-Aided Design (CAD) application for Windows, written in C++17. It bridges the gap between a digital 3D model and a physical CNC machine by generating the toolpaths needed to cut parts from raw material.
+**CAM-Expert** is a comprehensive Computer-Aided Manufacturing (CAM) and Computer-Aided Design (CAD) application for Windows, written in C++20. It bridges the gap between a digital 3D model and a physical CNC machine by generating the toolpaths needed to cut parts from raw material.
 
 Built entirely on the Win32 API with an OpenGL 3-D viewport, CAM-Expert requires no third-party UI framework and ships as a single native executable. An embedded **AI Copilot** subsystem (local SLM inference, intent parsing, vector-database RAG) lets operators describe machining intent in plain English and receive fully parameterised toolpath proposals.
 
@@ -19,6 +19,10 @@ Built entirely on the Win32 API with an OpenGL 3-D viewport, CAM-Expert requires
 - **Dual-light OpenGL rendering** – secondary blue-tinted fill light (`GL_LIGHT1`) for professional 3-point lighting quality
 - **NURBS offset surface fix** – `makeOffset()` previously wrote zero-filled placeholder knot vectors; now uses proper clamped uniform knot vectors
 - **Header deduplication** – removed 200-line duplicate class/constant block that existed outside the `#endif` in `MainWindow.h`
+- **Constraint solver foundation** – new `src/cad/ConstraintSolver.*` module adds geometric constraint types, edit/solve lifecycle, and diagnostics for parametric sketch workflows
+- **SQL single-source-of-truth foundation** – new `src/cam/SqlToolDatabase.*` provides canonical SQL schema/migration/export and integration hooks for tool/material/cutting data
+- **Scriptable post-processor profiles** – `PostProcessor` now supports loading external key/value script profiles for controller/dialect customization without recompilation
+- **OpenMP-ready 3D projection loop** – `Strategies3D::projectOntoMesh` now supports optional OpenMP acceleration with deterministic minimum-hit reduction
 
 ### Keyboard Shortcuts (v1.2 additions)
 
@@ -147,6 +151,7 @@ Use the **Solids Manager** side panel as a feature/history tree. You can revisit
 - **MSVC 2019 or later** (Visual Studio 2019, 2022, or 2026) *or* **MinGW-w64 / Clang** with Win32 headers
 - **CMake 3.20+**
 - **OpenGL** (provided by Windows via `opengl32.lib` and `glu32.lib`)
+- **C++20-capable compiler**
 
 ### Build steps
 
@@ -213,6 +218,13 @@ cmake --build --preset release-vs2026
 ```bash
 cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build build
+```
+
+#### Reproducible containerized configure/build
+
+```bash
+docker build -t camexpert-ci .
+docker run --rm camexpert-ci
 ```
 
 > **Toolset mismatch?**  If you see error `MSB8020: The build tools for Visual Studio 20XX

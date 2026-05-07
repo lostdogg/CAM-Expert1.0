@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <limits>
 #include <sstream>
+#if defined(CAMEXPERT_USE_OPENMP)
+#include <omp.h>
+#endif
 
 static constexpr double PI3D = 3.14159265358979323846;
 
@@ -58,13 +61,29 @@ bool Strategies3D::projectOntoMesh(const MeshData& mesh,
     double tMin = std::numeric_limits<double>::max();
     bool   hit  = false;
 
-    for (const auto& tri : mesh.triangles()) {
+    const auto& tris = mesh.triangles();
+#if defined(CAMEXPERT_USE_OPENMP)
+    double localMin = std::numeric_limits<double>::max();
+    int hitInt = 0;
+#pragma omp parallel for reduction(min:localMin) reduction(|:hitInt) if(tris.size() > 1000)
+    for (int i = 0; i < static_cast<int>(tris.size()); ++i) {
+        double t = 0.0;
+        if (rayTriIntersect(ray, tris[static_cast<std::size_t>(i)], t)) {
+            hitInt |= 1;
+            if (t < localMin) localMin = t;
+        }
+    }
+    hit = (hitInt != 0);
+    tMin = localMin;
+#else
+    for (const auto& tri : tris) {
         double t;
         if (rayTriIntersect(ray, tri, t) && t < tMin) {
             tMin = t;
             hit  = true;
         }
     }
+#endif
     if (hit) z = 1e6 - tMin;
     return hit;
 }
