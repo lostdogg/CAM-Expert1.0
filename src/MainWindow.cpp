@@ -2950,7 +2950,8 @@ void MainWindow::createWireframe(int commandId) {
         updateWfStatusBar();
     };
 
-    static constexpr double kTwoPi    = 6.28318530717959;
+    static constexpr double kTwoPi    = 2.0 * kPi;
+    static constexpr double kDegToRad = kPi / 180.0;
 
     switch (commandId) {
 
@@ -3177,12 +3178,12 @@ void MainWindow::createWireframe(int commandId) {
             return;
         }
 
-        auto normalizeAngle = [kTwoPi](double a) {
+        auto normalizeAngle = [](double a) {
             a = std::fmod(a, kTwoPi);
             if (a < 0.0) a += kTwoPi;
             return a;
         };
-        auto ccwSpan = [kTwoPi](double start, double end) {
+        auto ccwSpan = [](double start, double end) {
             double span = std::fmod(end - start, kTwoPi);
             if (span < 0.0) span += kTwoPi;
             return span;

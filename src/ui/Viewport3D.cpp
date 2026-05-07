@@ -1246,6 +1246,7 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_MOUSEWHEEL: {
         // Determine which modifier keys are held
         bool ctrl  = (GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL) != 0;
+        bool shift = (GET_KEYSTATE_WPARAM(wParam) & MK_SHIFT)   != 0;
         int  delta = GET_WHEEL_DELTA_WPARAM(wParam);
         float ticks = static_cast<float>(delta) / WHEEL_DELTA;
 
