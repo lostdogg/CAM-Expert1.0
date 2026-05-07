@@ -36,6 +36,7 @@
 #include <fstream>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <cstdio>
 #include <cstdlib>
 #include <cwchar>
@@ -926,6 +927,7 @@ void MainWindow::onCommand(int id) {
     case IDM_WF_BBOX:
     case IDM_WF_CURVE_ONE_EDGE:
     case IDM_WF_CURVE_ALL_EDGES:
+    case IDM_WF_SILHOUETTE:
     case IDM_WF_CURVE_SLICE_PLN:
     case IDM_WF_CURVE_SLICE_CRV:
     case IDM_WF_CURVE_FLOWLINE:
@@ -2964,6 +2966,104 @@ void MainWindow::createWireframe(int commandId) {
 
     static constexpr double kTwoPi    = 2.0 * kPi;
     static constexpr double kDegToRad = kPi / 180.0;
+    static constexpr double kEps      = 1e-9;
+
+    auto addLine3D = [&commit](const Geom::Vec3& a, const Geom::Vec3& b) {
+        WfEntity e;
+        e.type = WfEntityType::Line;
+        e.p0   = a;
+        e.p1   = b;
+        commit(std::move(e));
+    };
+
+    auto addLine2D = [this, &addLine3D](double x0, double y0, double x1, double y1) {
+        const Geom::Vec3 a = m_wfScene ? m_wfScene->toWorld(x0, y0) : Geom::Vec3{x0, y0, 0.0};
+        const Geom::Vec3 b = m_wfScene ? m_wfScene->toWorld(x1, y1) : Geom::Vec3{x1, y1, 0.0};
+        addLine3D(a, b);
+    };
+
+    auto gatherTargetSolids = [this]() {
+        std::vector<const BRep::Solid*> solids;
+        if (!m_solidsMgr || m_solidsMgr->count() <= 0) return solids;
+        auto selected = m_solidsMgr->selectedIndices();
+        for (int si : selected) {
+            if (si >= 0 && si < m_solidsMgr->count())
+                solids.push_back(&m_solidsMgr->at(si).solid);
+        }
+        if (solids.empty()) {
+            BRep::Solid* a = activeSolid();
+            if (a) solids.push_back(a);
+        }
+        return solids;
+    };
+
+    auto gatherTargetSurfaces = [this]() {
+        std::vector<const NurbsSurface*> surfaces;
+        if (!m_surfacesMgr || m_surfacesMgr->count() <= 0) return surfaces;
+        const SurfaceEntry* active = m_surfacesMgr->activeSurface();
+        if (active) surfaces.push_back(&active->surface);
+        return surfaces;
+    };
+
+    auto expandBoxFromSurface = [](const NurbsSurface& srf, Geom::AABB& box, int resU, int resV) {
+        auto tris = srf.tessellate(resU, resV);
+        for (const auto& tri : tris) {
+            box.expand(tri.v[0]);
+            box.expand(tri.v[1]);
+            box.expand(tri.v[2]);
+        }
+    };
+
+    auto collectProjectedPointsXY = [](const BRep::Solid& solid, std::vector<Geom::Vec2>& outPts) {
+        outPts.reserve(outPts.size() + solid.vertices().size());
+        for (const auto& v : solid.vertices())
+            outPts.push_back({v.point.x, v.point.y});
+    };
+
+    auto collectProjectedPointsXYSurface = [](const NurbsSurface& srf, std::vector<Geom::Vec2>& outPts, int resU, int resV) {
+        auto tris = srf.tessellate(resU, resV);
+        outPts.reserve(outPts.size() + tris.size() * 3);
+        for (const auto& tri : tris) {
+            outPts.push_back({tri.v[0].x, tri.v[0].y});
+            outPts.push_back({tri.v[1].x, tri.v[1].y});
+            outPts.push_back({tri.v[2].x, tri.v[2].y});
+        }
+    };
+
+    auto convexHull = [](std::vector<Geom::Vec2> pts) {
+        std::vector<Geom::Vec2> hull;
+        if (pts.size() < 3) return hull;
+        std::sort(pts.begin(), pts.end(), [](const Geom::Vec2& a, const Geom::Vec2& b) {
+            if (a.x != b.x) return a.x < b.x;
+            return a.y < b.y;
+        });
+        pts.erase(std::unique(pts.begin(), pts.end(), [](const Geom::Vec2& a, const Geom::Vec2& b) {
+            return std::abs(a.x - b.x) < 1e-9 && std::abs(a.y - b.y) < 1e-9;
+        }), pts.end());
+        if (pts.size() < 3) return hull;
+
+        auto cross = [](const Geom::Vec2& o, const Geom::Vec2& a, const Geom::Vec2& b) {
+            return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+        };
+        std::vector<Geom::Vec2> lower;
+        for (const auto& p : pts) {
+            while (lower.size() >= 2 && cross(lower[lower.size() - 2], lower.back(), p) <= 0.0)
+                lower.pop_back();
+            lower.push_back(p);
+        }
+        std::vector<Geom::Vec2> upper;
+        for (int i = static_cast<int>(pts.size()) - 1; i >= 0; --i) {
+            const auto& p = pts[static_cast<std::size_t>(i)];
+            while (upper.size() >= 2 && cross(upper[upper.size() - 2], upper.back(), p) <= 0.0)
+                upper.pop_back();
+            upper.push_back(p);
+        }
+        lower.pop_back();
+        upper.pop_back();
+        hull = std::move(lower);
+        hull.insert(hull.end(), upper.begin(), upper.end());
+        return hull;
+    };
 
     switch (commandId) {
 
@@ -3482,37 +3582,125 @@ void MainWindow::createWireframe(int commandId) {
     }
 
     case IDM_WF_HELIX: {
-        double pitch = 5.0, revs = 3.0, r = 20.0;
-        if (!promptTriple(L"Spiral / Helix",
-                          L"Pitch (mm/rev):", pitch, pitch,
-                          L"Revolutions:", revs,   revs,
-                          L"Radius (mm):",  r,     r)) return;
-        if (pitch <= 0 || revs <= 0 || r <= 0) {
-            MessageBoxW(m_hwnd, L"Pitch, revolutions, and radius must all be positive.",
+        double cx = 0.0, cy = 0.0, revs = 3.0;
+        if (!promptTriple(L"Spiral / Helix - Center and Turns",
+                          L"Center X (mm):", cx, cx,
+                          L"Center Y (mm):", cy, cy,
+                          L"Revolutions:", revs, revs)) return;
+        double rStart = 20.0, rEnd = 20.0;
+        if (!promptDouble2(L"Spiral / Helix - Radii",
+                           L"Start radius (mm):", rStart, rStart,
+                           L"End radius (mm):",   rEnd,   rEnd)) return;
+        double mode = 0.0;
+        if (!promptSingle(L"Spiral / Helix - Height mode",
+                          L"0 = pitch input, 1 = total height input:", mode, mode)) return;
+        double pitch = 5.0;
+        double totalHeight = 15.0;
+        if (mode >= 0.5) {
+            if (!promptSingle(L"Spiral / Helix - Total Height",
+                              L"Total height (mm):", totalHeight, totalHeight)) return;
+            pitch = (std::abs(revs) > kEps) ? (totalHeight / revs) : 0.0;
+        } else {
+            if (!promptSingle(L"Spiral / Helix - Pitch",
+                              L"Pitch (mm/rev):", pitch, pitch)) return;
+            totalHeight = pitch * revs;
+        }
+        if (revs <= 0 || rStart <= 0 || rEnd <= 0 || std::abs(totalHeight) <= kEps || pitch <= 0.0) {
+            MessageBoxW(m_hwnd, L"Revolutions, radii, and height/pitch must all be positive.",
                         L"Spiral/Helix", MB_OK | MB_ICONWARNING);
             return;
         }
-        double totalHeight = pitch * revs;
         bumpLevel();
         WfEntity e;
         e.type        = WfEntityType::Helix;
-        e.p0          = m_wfScene ? m_wfScene->toWorld(0, 0) : Geom::Vec3{};
-        e.radius      = r;
+        e.p0          = m_wfScene ? m_wfScene->toWorld(cx, cy) : Geom::Vec3{cx, cy, 0.0};
+        e.radius      = rStart;
+        e.radius2     = rEnd;
         e.pitch       = pitch;
         e.revolutions = revs;
         e.height      = totalHeight;
         commit(std::move(e));
         wchar_t msg[192] = {};
         std::swprintf(msg, 192,
-            L"Helix: R=%.4g mm, pitch=%.4g mm, %.4g revs, height=%.4g mm",
-            r, pitch, revs, totalHeight);
+            L"Helix: center=(%.4g,%.4g), Rstart=%.4g, Rend=%.4g, pitch=%.4g, revs=%.4g, H=%.4g mm",
+            cx, cy, rStart, rEnd, pitch, revs, totalHeight);
         SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
     case IDM_WF_BBOX: {
+        auto solids = gatherTargetSolids();
+        auto surfaces = gatherTargetSurfaces();
+        if (solids.empty() && surfaces.empty()) {
+            MessageBoxW(m_hwnd, L"Bounding Box requires an active solid or surface.",
+                        L"Bounding Box", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        double pad = 0.25;
+        if (!promptSingle(L"Bounding Box", L"Padding (mm):", pad, pad)) return;
+        if (pad < 0.0) pad = 0.0;
+        double mode = 0.0;
+        if (!promptSingle(L"Bounding Box Output", L"0 = lines/arcs, 1 = solid block:", mode, mode)) return;
+
+        Geom::AABB box;
+        for (const auto* s : solids) {
+            if (!s) continue;
+            Geom::AABB b = s->boundingBox();
+            if (b.isValid()) {
+                box.expand(b.min);
+                box.expand(b.max);
+            }
+        }
+        for (const auto* srf : surfaces) {
+            if (!srf) continue;
+            expandBoxFromSurface(*srf, box, 24, 24);
+        }
+        if (!box.isValid()) {
+            MessageBoxW(m_hwnd, L"Failed to compute a valid bounding box.",
+                        L"Bounding Box", MB_OK | MB_ICONWARNING);
+            return;
+        }
+
+        box.min.x -= pad; box.min.y -= pad; box.min.z -= pad;
+        box.max.x += pad; box.max.y += pad; box.max.z += pad;
+
+        if (mode >= 0.5) {
+            if (!m_solidsMgr) return;
+            auto block = BRep::Solid::makeBox(
+                std::max(0.001, box.max.x - box.min.x),
+                std::max(0.001, box.max.y - box.min.y),
+                std::max(0.001, box.max.z - box.min.z));
+            // Translate block to min corner.
+            BRep::Solid placed;
+            placed.setName("Stock_Bounding_Block");
+            for (const auto& v : block.vertices())
+                placed.addVertex({v.point.x + box.min.x, v.point.y + box.min.y, v.point.z + box.min.z});
+            for (const auto& e : block.edges())
+                placed.addEdge(e.startVertexId, e.endVertexId, e.isCurved);
+            for (const auto& f : block.faces())
+                placed.addFace(f.type, f.edgeIds, f.normal);
+            m_solidsMgr->addSolid(std::move(placed));
+            SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
+                reinterpret_cast<LPARAM>(L"Bounding Box: stock solid block created."));
+            if (m_viewport) m_viewport->redraw();
+            break;
+        }
+
+        // Lines/arcs mode: create a rectangular cage (bottom, top, and uprights).
+        bumpLevel(12);
+        const Geom::Vec3 p000{box.min.x, box.min.y, box.min.z};
+        const Geom::Vec3 p100{box.max.x, box.min.y, box.min.z};
+        const Geom::Vec3 p110{box.max.x, box.max.y, box.min.z};
+        const Geom::Vec3 p010{box.min.x, box.max.y, box.min.z};
+        const Geom::Vec3 p001{box.min.x, box.min.y, box.max.z};
+        const Geom::Vec3 p101{box.max.x, box.min.y, box.max.z};
+        const Geom::Vec3 p111{box.max.x, box.max.y, box.max.z};
+        const Geom::Vec3 p011{box.min.x, box.max.y, box.max.z};
+        addLine3D(p000, p100); addLine3D(p100, p110); addLine3D(p110, p010); addLine3D(p010, p000);
+        addLine3D(p001, p101); addLine3D(p101, p111); addLine3D(p111, p011); addLine3D(p011, p001);
+        addLine3D(p000, p001); addLine3D(p100, p101); addLine3D(p110, p111); addLine3D(p010, p011);
         SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
-            reinterpret_cast<LPARAM>(L"Bounding Box: select geometry to generate its 2D/3D bounding rectangle."));
+            reinterpret_cast<LPARAM>(L"Bounding Box: wireframe cage created from geometry extents."));
         break;
     }
 
@@ -3527,8 +3715,64 @@ void MainWindow::createWireframe(int commandId) {
     }
 
     case IDM_WF_CURVE_ALL_EDGES: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
-            reinterpret_cast<LPARAM>(L"Curve All Edges: select a solid or surface to extract all edges as wireframe."));
+        auto solids = gatherTargetSolids();
+        if (solids.empty()) {
+            MessageBoxW(m_hwnd, L"Curve All Edges requires an active solid.",
+                        L"Curve All Edges", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        int extracted = 0;
+        for (const auto* solid : solids) {
+            if (!solid) continue;
+            const auto& verts = solid->vertices();
+            for (const auto& edge : solid->edges()) {
+                if (edge.startVertexId < 0 || edge.endVertexId < 0) continue;
+                if (edge.startVertexId >= static_cast<int>(verts.size()) ||
+                    edge.endVertexId >= static_cast<int>(verts.size())) continue;
+                bumpLevel();
+                addLine3D(verts[static_cast<std::size_t>(edge.startVertexId)].point,
+                          verts[static_cast<std::size_t>(edge.endVertexId)].point);
+                ++extracted;
+            }
+        }
+        wchar_t msg[160] = {};
+        std::swprintf(msg, 160, L"Curve All Edges: extracted %d edge curve(s).", extracted);
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
+        break;
+    }
+
+    case IDM_WF_SILHOUETTE: {
+        auto solids = gatherTargetSolids();
+        auto surfaces = gatherTargetSurfaces();
+        if (solids.empty() && surfaces.empty()) {
+            MessageBoxW(m_hwnd, L"Silhouette requires an active solid or surface.",
+                        L"Silhouette Boundary", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        double tol = 0.5;
+        if (!promptSingle(L"Silhouette Boundary", L"Tolerance (mm):", tol, tol)) return;
+        if (tol <= 0.0) tol = 0.5;
+        const int res = std::max(8, std::min(80, static_cast<int>(std::round(40.0 / std::sqrt(tol)))));
+
+        std::vector<Geom::Vec2> projected;
+        for (const auto* s : solids) collectProjectedPointsXY(*s, projected);
+        for (const auto* srf : surfaces) collectProjectedPointsXYSurface(*srf, projected, res, res);
+        auto hull = convexHull(std::move(projected));
+        if (hull.size() < 3) {
+            MessageBoxW(m_hwnd, L"Unable to compute silhouette boundary from current geometry.",
+                        L"Silhouette Boundary", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        bumpLevel(static_cast<int>(hull.size()));
+        for (std::size_t i = 0; i < hull.size(); ++i) {
+            const auto& a = hull[i];
+            const auto& b = hull[(i + 1) % hull.size()];
+            addLine2D(a.x, a.y, b.x, b.y);
+        }
+        wchar_t msg[160] = {};
+        std::swprintf(msg, 160, L"Silhouette Boundary: generated closed chain with %d segment(s).",
+                      static_cast<int>(hull.size()));
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
@@ -3573,8 +3817,57 @@ void MainWindow::createWireframe(int commandId) {
     }
 
     case IDM_WF_CURVE_INTERSECT: {
-        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
-            reinterpret_cast<LPARAM>(L"Curve at Intersection: select two intersecting surfaces or solids to extract intersection curves."));
+        auto solids = gatherTargetSolids();
+        if (solids.empty() || !m_wfScene) {
+            MessageBoxW(m_hwnd, L"Intersection Curve requires an active solid and work plane.",
+                        L"Intersection Curve", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        const CplaneType cp = m_wfScene->cplane();
+        const double d = m_wfScene->zDepth();
+        auto signedDist = [cp, d](const Geom::Vec3& p) {
+            switch (cp) {
+            case CplaneType::Top:    return p.z - d;
+            case CplaneType::Bottom: return p.z - d;
+            case CplaneType::Front:  return p.y - d;
+            case CplaneType::Back:   return p.y - d;
+            case CplaneType::Right:  return p.x - d;
+            case CplaneType::Left:   return p.x - d;
+            default:                 return p.z - d;
+            }
+        };
+
+        int segs = 0;
+        for (const auto* solid : solids) {
+            if (!solid) continue;
+            const auto& verts = solid->vertices();
+            for (const auto& edge : solid->edges()) {
+                if (edge.startVertexId < 0 || edge.endVertexId < 0) continue;
+                if (edge.startVertexId >= static_cast<int>(verts.size()) ||
+                    edge.endVertexId >= static_cast<int>(verts.size())) continue;
+                const Geom::Vec3 a = verts[static_cast<std::size_t>(edge.startVertexId)].point;
+                const Geom::Vec3 b = verts[static_cast<std::size_t>(edge.endVertexId)].point;
+                const double da = signedDist(a);
+                const double db = signedDist(b);
+                if (std::abs(da) < kEps && std::abs(db) < kEps) {
+                    bumpLevel();
+                    addLine3D(a, b);
+                    ++segs;
+                    continue;
+                }
+                if (da * db > 0.0) continue;
+                const double t = da / (da - db);
+                const Geom::Vec3 p = a + (b - a) * t;
+                // Emit a very short marker segment so intersection remains visible as wireframe.
+                const Geom::Vec3 q = p + Geom::Vec3{0.05, 0.05, 0.05};
+                bumpLevel();
+                addLine3D(p, q);
+                ++segs;
+            }
+        }
+        wchar_t msg[160] = {};
+        std::swprintf(msg, 160, L"Intersection Curve: generated %d intersection segment marker(s).", segs);
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }
 
@@ -3650,22 +3943,88 @@ void MainWindow::createWireframe(int commandId) {
     }
 
     case IDM_WF_MOD_PROJECT: {
-        double nx = 0.0, ny = 0.0, nz = 1.0;
-        if (!promptTriple(L"Project Geometry",
-                          L"Plane normal X:", nx, nx,
-                          L"Plane normal Y:", ny, ny,
-                          L"Plane normal Z:", nz, nz)) return;
-        double nmag = std::sqrt(nx*nx + ny*ny + nz*nz);
-        if (nmag < 1e-9) {
-            MessageBoxW(m_hwnd, L"Normal vector must not be zero.",
+        if (!m_wfScene) return;
+        auto selected = m_wfScene->selectedIndices();
+        if (selected.empty()) {
+            MessageBoxW(m_hwnd, L"Select wireframe entities to project first.",
                         L"Project", MB_OK | MB_ICONWARNING);
             return;
         }
-        nx /= nmag; ny /= nmag; nz /= nmag;
+        double targetMode = 0.0;
+        if (!promptSingle(L"Project Geometry",
+                          L"Target: 0 = Z-depth plane, 1 = active surface:", targetMode, targetMode)) return;
+        double copyMode = 1.0;
+        if (!promptSingle(L"Project Geometry",
+                          L"Operation: 0 = Move, 1 = Copy:", copyMode, copyMode)) return;
+        bool makeCopy = copyMode >= 0.5;
+
+        double targetZ = m_wfScene->zDepth();
+        const SurfaceEntry* activeSurf = (m_surfacesMgr ? m_surfacesMgr->activeSurface() : nullptr);
+        if (targetMode < 0.5) {
+            if (!promptSingle(L"Project to Plane", L"Target Z depth (mm):", targetZ, targetZ)) return;
+        } else if (!activeSurf) {
+            MessageBoxW(m_hwnd, L"No active surface selected for projection target.",
+                        L"Project", MB_OK | MB_ICONWARNING);
+            return;
+        }
+
+        std::vector<std::pair<int, WfEntity>> projected;
+        const auto& entsConst = m_wfScene->entities();
+        projected.reserve(selected.size());
+
+        auto projectPoint = [&](const Geom::Vec3& p) {
+            if (targetMode < 0.5) return Geom::Vec3{p.x, p.y, targetZ};
+            auto tris = activeSurf->surface.tessellate(24, 24);
+            Geom::Vec3 best = p;
+            bool found = false;
+            double bestDist2 = 1e100;
+            for (const auto& tri : tris) {
+                const Geom::Vec3 c{
+                    (tri.v[0].x + tri.v[1].x + tri.v[2].x) / 3.0,
+                    (tri.v[0].y + tri.v[1].y + tri.v[2].y) / 3.0,
+                    (tri.v[0].z + tri.v[1].z + tri.v[2].z) / 3.0
+                };
+                const double dx = c.x - p.x;
+                const double dy = c.y - p.y;
+                const double d2 = dx * dx + dy * dy;
+                if (d2 < bestDist2) {
+                    bestDist2 = d2;
+                    best = {p.x, p.y, c.z};
+                    found = true;
+                }
+            }
+            return found ? best : p;
+        };
+
+        for (int idx : selected) {
+            if (idx < 0 || idx >= static_cast<int>(entsConst.size())) continue;
+            WfEntity e = entsConst[static_cast<std::size_t>(idx)];
+            e.p0 = projectPoint(e.p0);
+            e.p1 = projectPoint(e.p1);
+            for (auto& p : e.pts) p = projectPoint(p);
+            projected.push_back({idx, std::move(e)});
+        }
+
+        if (!makeCopy) {
+            auto& ents = const_cast<std::vector<WfEntity>&>(m_wfScene->entities());
+            m_wfScene->pushUndoState();
+            for (auto& item : projected) {
+                int idx = item.first;
+                if (idx >= 0 && idx < static_cast<int>(ents.size()))
+                    ents[static_cast<std::size_t>(idx)] = item.second;
+            }
+            if (m_viewport) m_viewport->redraw();
+            SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
+                reinterpret_cast<LPARAM>(L"Project: selected geometry moved to target."));
+            break;
+        }
+        bumpLevel(static_cast<int>(projected.size()));
+        for (auto& item : projected) commit(std::move(item.second));
         wchar_t msg[192] = {};
         std::swprintf(msg, 192,
-            L"Project: select geometry to flatten onto plane with normal (%.3g, %.3g, %.3g).",
-            nx, ny, nz);
+            L"Project: %d entity(ies) copied onto %s target.",
+            static_cast<int>(projected.size()),
+            (targetMode < 0.5) ? L"plane" : L"surface");
         SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG, reinterpret_cast<LPARAM>(msg));
         break;
     }

@@ -147,6 +147,7 @@ void RibbonUI::buildWireframeTab() {
     RibbonGroup curves{"Curves", {
         {IDM_WF_CURVE_ONE_EDGE,  "Curve Edge",   "Convert a selected solid or surface edge into matching wireframe geometry"},
         {IDM_WF_CURVE_ALL_EDGES, "Curve All",    "Extract wireframe from all edges of a solid or surface"},
+        {IDM_WF_SILHOUETTE,      "Silhouette",   "Project the outer silhouette boundary of a solid/surface onto the active work plane"},
         {IDM_WF_CURVE_SLICE_PLN, "Slice/Plane",  "Create wireframe cross-sections by slicing with a plane"},
         {IDM_WF_CURVE_SLICE_CRV, "Slice/Curve",  "Create cross-sections perpendicular to a drive curve"},
         {IDM_WF_CURVE_FLOWLINE,  "Flowline",     "Create curves along the U and V flowlines of a surface"},
@@ -501,6 +502,7 @@ static int iconShapeForId(int cmdId) {
     // Splines / curves
     case IDM_WF_SPLINE: case IDM_WF_SPLINE_AUTO: case IDM_WF_SPLINE_BLENDED:
     case IDM_WF_CURVE_ONE_EDGE: case IDM_WF_CURVE_ALL_EDGES:
+    case IDM_WF_SILHOUETTE:
     case IDM_WF_CURVE_SLICE_PLN: case IDM_WF_CURVE_SLICE_CRV:
     case IDM_WF_CURVE_FLOWLINE: case IDM_WF_CURVE_INTERSECT:
     case IDM_SURF_LOFT: case IDM_SURF_REVOLVE: case IDM_SURF_EXTEND:
