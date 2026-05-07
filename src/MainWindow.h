@@ -130,13 +130,20 @@ constexpr int IDM_WF_SET_CPLANE      = 4042;  // Cycle to next Cplane [F8]
 constexpr int IDM_WF_SET_ZDEPTH      = 4043;  // Prompt for Z-depth value [F9]
 
 // Surfaces tab commands
-constexpr int IDM_SURF_LOFT       = 4101;
-constexpr int IDM_SURF_REVOLVE    = 4102;
-constexpr int IDM_SURF_FILLET     = 4103;
-constexpr int IDM_SURF_OFFSET     = 4104;
-constexpr int IDM_SURF_TRIM       = 4105;
-constexpr int IDM_SURF_UNTRIM     = 4106;
-constexpr int IDM_SURF_EXTEND     = 4107;
+constexpr int IDM_SURF_LOFT            = 4101;  // Ruled/Lofted surface between cross-sections
+constexpr int IDM_SURF_REVOLVE         = 4102;  // Surface of revolution
+constexpr int IDM_SURF_FILLET          = 4103;  // Fillet blend surface between two surfaces
+constexpr int IDM_SURF_OFFSET          = 4104;  // Offset surface by distance
+constexpr int IDM_SURF_TRIM            = 4105;  // Trim surface with a wireframe curve
+constexpr int IDM_SURF_UNTRIM          = 4106;  // Remove trim boundaries from surface
+constexpr int IDM_SURF_EXTEND          = 4107;  // Extend a surface edge
+constexpr int IDM_SURF_FLAT_BOUNDARY   = 4108;  // Flat surface within a closed wireframe loop
+constexpr int IDM_SURF_SWEPT           = 4109;  // Drive a cross-section profile along a path
+constexpr int IDM_SURF_NET             = 4110;  // Net surface from U/V wireframe grid
+constexpr int IDM_SURF_FENCE           = 4111;  // Project a surface from a curve at a vector/distance
+constexpr int IDM_SURF_DRAFT_SURF      = 4112;  // Extend a surface from a curve at a draft angle
+constexpr int IDM_SURF_TRIM_TO_SURF    = 4113;  // Trim one surface using another intersecting surface
+constexpr int IDM_SURF_FROM_SOLID      = 4114;  // Extract individual surfaces from a solid body
 
 // Solids tab commands – Create group (history-based, from wireframe chains)
 constexpr int IDM_SOLID_EXTRUDE   = 4201;  // Extrude a 2D profile into a solid
@@ -325,13 +332,20 @@ private:
     void updateWfStatusBar();  // refresh the Cplane and Z-depth panels in the status bar
 
     // --- Surface creation (Surfaces tab) ---
-    void surfaceLoft();           // IDM_SURF_LOFT:    loft through cross-sections
-    void surfaceRevolve();        // IDM_SURF_REVOLVE: surface of revolution
-    void surfaceFillet();         // IDM_SURF_FILLET:  fillet blend between surfaces
-    void surfaceOffset();         // IDM_SURF_OFFSET:  offset active surface
-    void surfaceTrim();           // IDM_SURF_TRIM:    trim active surface
-    void surfaceUntrim();         // IDM_SURF_UNTRIM:  remove trim from active surface
-    void surfaceExtend();         // IDM_SURF_EXTEND:  extend active surface
+    void surfaceLoft();           // IDM_SURF_LOFT:          ruled/loft surface through cross-sections
+    void surfaceRevolve();        // IDM_SURF_REVOLVE:       surface of revolution
+    void surfaceFillet();         // IDM_SURF_FILLET:        fillet blend between surfaces
+    void surfaceOffset();         // IDM_SURF_OFFSET:        offset active surface
+    void surfaceTrim();           // IDM_SURF_TRIM:          trim surface with a wireframe curve
+    void surfaceUntrim();         // IDM_SURF_UNTRIM:        remove trim from active surface
+    void surfaceExtend();         // IDM_SURF_EXTEND:        extend active surface
+    void surfaceFlatBoundary();   // IDM_SURF_FLAT_BOUNDARY: flat surface from a rectangular loop
+    void surfaceSwept();          // IDM_SURF_SWEPT:         sweep cross-section along a path
+    void surfaceNet();            // IDM_SURF_NET:           net surface from U/V wireframe grid
+    void surfaceFence();          // IDM_SURF_FENCE:         fence surface from curve + vector
+    void surfaceDraft();          // IDM_SURF_DRAFT_SURF:    draft surface at a specified angle
+    void surfaceTrimToSurface();  // IDM_SURF_TRIM_TO_SURF:  trim surface against another surface
+    void surfaceFromSolid();      // IDM_SURF_FROM_SOLID:    extract surfaces from a solid body
 
     // --- Model Prep commands (Model Prep tab) ---
     void prepHeal();          // Heal gaps on active solid

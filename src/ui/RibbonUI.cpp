@@ -189,17 +189,34 @@ void RibbonUI::buildSurfacesSolidsTab() {
     RibbonTab tab;
     tab.name = "Surfaces & Solids";
 
-    // ── Surfaces ──────────────────────────────────────────────────────────
-    RibbonGroup surfCreate{"Surf Create", {
-        {IDM_SURF_LOFT,    "Loft",    "Loft surface through cross-sections"},
-        {IDM_SURF_REVOLVE, "Revolve", "Revolve a curve about an axis"},
-        {IDM_SURF_EXTEND,  "Extend",  "Extend a surface to meet another"}
+    // ── Basic Surface Creation ─────────────────────────────────────────────
+    RibbonGroup surfBasic{"Basic Creation", {
+        {IDM_SURF_FLAT_BOUNDARY, "Flat",     "Flat Boundary: fill a closed wireframe loop with a perfectly flat surface"},
+        {IDM_SURF_LOFT,          "Ruled/Loft","Ruled/Lofted: stretch a surface between two or more separate wireframe chains"},
+        {IDM_SURF_REVOLVE,       "Revolve",  "Revolved: spin a profile around a centre axis (partial or full 360°)"},
+        {IDM_SURF_SWEPT,         "Swept",    "Swept: drive a cross-section profile along one or more rail paths"}
     }};
-    RibbonGroup surfEdit{"Surf Edit", {
-        {IDM_SURF_FILLET,  "Fillet",  "Fillet between two surfaces"},
-        {IDM_SURF_OFFSET,  "Offset",  "Offset a surface by a distance"},
-        {IDM_SURF_TRIM,    "Trim",    "Trim surface with a cutting curve"},
-        {IDM_SURF_UNTRIM,  "Untrim",  "Remove trim boundaries from surface"}
+
+    // ── Advanced Shape Generation ──────────────────────────────────────────
+    RibbonGroup surfAdvanced{"Advanced", {
+        {IDM_SURF_NET,        "Net",   "Net Surface: create a surface from a grid of intersecting U and V wireframe chains"},
+        {IDM_SURF_FENCE,      "Fence", "Fence Surface: project a surface from a curve at a specific angle and distance"},
+        {IDM_SURF_DRAFT_SURF, "Draft", "Draft Surface: extend a surface from a curve at a specified draft angle for mold pull"}
+    }};
+
+    // ── Surface Modification and Cleanup ──────────────────────────────────
+    RibbonGroup surfModify{"Surf Modify", {
+        {IDM_SURF_TRIM,         "Trim/Crv", "Trim to Curves: use a wireframe line to cut a hole or trim the edge of a surface"},
+        {IDM_SURF_TRIM_TO_SURF, "Trim/Srf", "Trim to Surfaces: use one surface to cut another where they intersect"},
+        {IDM_SURF_UNTRIM,       "Untrim",   "Untrim: restore a trimmed surface to its original un-cut mathematical boundaries"},
+        {IDM_SURF_FILLET,       "Fillet",   "Fillet Surfaces: create a smooth radiused transition where two surfaces meet"}
+    }};
+
+    // ── Utility ────────────────────────────────────────────────────────────
+    RibbonGroup surfUtil{"Surf Utility", {
+        {IDM_SURF_FROM_SOLID, "From Solid", "From Solids: convert the faces of a 3D solid model into individual surfaces"},
+        {IDM_SURF_OFFSET,     "Offset",     "Offset: create a duplicate surface at a specific distance from the original"},
+        {IDM_SURF_EXTEND,     "Extend",     "Extend a surface edge by a specified distance"}
     }};
 
     // ── Solids – Create ───────────────────────────────────────────────────
@@ -243,8 +260,10 @@ void RibbonUI::buildSurfacesSolidsTab() {
         {IDM_SOLID_FROM_SURF,"From Surfs","Convert a collection of closed surfaces into a watertight solid body"}
     }};
 
-    tab.groups.push_back(surfCreate);
-    tab.groups.push_back(surfEdit);
+    tab.groups.push_back(surfBasic);
+    tab.groups.push_back(surfAdvanced);
+    tab.groups.push_back(surfModify);
+    tab.groups.push_back(surfUtil);
     tab.groups.push_back(solCreate);
     tab.groups.push_back(solPrims);
     tab.groups.push_back(solModify);
@@ -478,7 +497,12 @@ static int iconShapeForId(int cmdId) {
     case IDM_SURF_LOFT: case IDM_SURF_REVOLVE: case IDM_SURF_EXTEND:
     case IDM_SURF_FILLET: case IDM_SURF_OFFSET:
     case IDM_SURF_TRIM: case IDM_SURF_UNTRIM:
+    case IDM_SURF_SWEPT: case IDM_SURF_NET: case IDM_SURF_FENCE:
+    case IDM_SURF_DRAFT_SURF: case IDM_SURF_TRIM_TO_SURF:
         return ISHAPE_SPLINE;
+    // Flat / rectangular surfaces
+    case IDM_SURF_FLAT_BOUNDARY: case IDM_SURF_FROM_SOLID:
+        return ISHAPE_RECT;
     // Rectangles / bounding box
     case IDM_WF_RECTANGLE: case IDM_WF_RECT_SHAPES: case IDM_WF_BBOX:
         return ISHAPE_RECT;

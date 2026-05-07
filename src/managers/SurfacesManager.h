@@ -97,6 +97,32 @@ public:
                                    const NurbsSurface& srf2,
                                    double filletRadius);
 
+    // Build a flat bilinear surface of the given width × depth in the XY-plane.
+    static NurbsSurface makeFlat(double width, double depth);
+
+    // Sweep a cross-section profile (polyline) along a polyline path.
+    // The section is translated and re-oriented to each point on the path.
+    static NurbsSurface makeSwept(const std::vector<Geom::Vec3>& crossSection,
+                                  const std::vector<Geom::Vec3>& path);
+
+    // Build a net surface from intersecting U-chains and V-chains.
+    // uChains: profiles in one direction; vChains: cross-profiles in the other.
+    // Grid intersection points are taken from uChains; vChains set the V spacing.
+    static NurbsSurface makeNet(
+        const std::vector<std::vector<Geom::Vec3>>& uChains,
+        const std::vector<std::vector<Geom::Vec3>>& vChains);
+
+    // Build a fence surface: extrude a base curve in a given direction by `length`.
+    static NurbsSurface makeFence(const std::vector<Geom::Vec3>& baseCurve,
+                                  const Geom::Vec3& direction,
+                                  double length);
+
+    // Build a draft surface: extrude a base curve upward at a draft angle.
+    // The wall leans outward by `draftAngleDeg` from vertical as it rises `height`.
+    static NurbsSurface makeDraft(const std::vector<Geom::Vec3>& baseCurve,
+                                  double draftAngleDeg,
+                                  double height);
+
 private:
     void notify();
 
