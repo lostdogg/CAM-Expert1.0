@@ -38,6 +38,7 @@ enum class SnapType {
     Endpoint,     // end / vertex of a line, arc, or polygon edge
     Midpoint,     // midpoint of a line segment or arc
     ArcCenter,    // mathematical center of a circle or arc
+    Quadrant,     // 0°/90°/180°/270° points on a circle
     Intersection  // crossing point of two entities (placeholder – future)
 };
 

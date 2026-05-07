@@ -358,7 +358,7 @@ void AutoCursor::collectCircleSnaps(const WfEntity& e,
         Geom::Vec3 q = { e.p0.x + e.radius * std::cos(a),
                          e.p0.y + e.radius * std::sin(a),
                          e.p0.z };
-        trySnap(out, SnapType::Endpoint, q, cursor, tol);
+        trySnap(out, SnapType::Quadrant, q, cursor, tol);
     }
 }
 
@@ -454,9 +454,10 @@ SnapResult AutoCursor::findSnap(const WireframeScene& scene,
         switch (t) {
         case SnapType::Intersection: return 0;
         case SnapType::Endpoint:     return 1;
-        case SnapType::Midpoint:     return 2;
-        case SnapType::ArcCenter:    return 3;
-        default:                     return 4;
+        case SnapType::Quadrant:     return 2;
+        case SnapType::Midpoint:     return 3;
+        case SnapType::ArcCenter:    return 4;
+        default:                     return 5;
         }
     };
     std::sort(candidates.begin(), candidates.end(),

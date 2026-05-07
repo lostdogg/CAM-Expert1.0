@@ -111,8 +111,11 @@ private:
     void drawToolpaths();
     void drawWireframe();  // render all wireframe entities from WireframeScene
     void drawSelectionWindowOverlay();
+    void drawSnapOverlay();
     bool entityMatchesFilter(const WfEntity& e) const;
     bool projectPoint(const Geom::Vec3& p, double& sx, double& sy, double& sz) const;
+    bool worldPointOnConstructionPlane(int screenX, int screenY, Geom::Vec3& out) const;
+    void zoomTowardScreenPoint(int screenX, int screenY, float ticks, bool precisionMode);
     int  hitTestEntityAt(int x, int y, double tolerancePx = 10.0) const;
     std::vector<Geom::Vec3> sampleEntityPoints(const WfEntity& e) const;
     std::vector<int> collectWindowSelection(int x0, int y0, int x1, int y1, bool crossing) const;
@@ -141,6 +144,8 @@ private:
     int   m_selectStartX = 0, m_selectStartY = 0;
     int   m_selectEndX = 0, m_selectEndY = 0;
     int   m_hoverEntity = -1;
+    bool  m_hasSnap = false;
+    SnapResult m_snapResult{};
 
     // Spin inertia (applied via WM_TIMER after a fast left-drag or wheel rotation)
     float       m_spinVelX      = 0.0f;

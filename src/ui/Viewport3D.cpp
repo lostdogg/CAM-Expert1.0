@@ -8,6 +8,7 @@
 #include <gl/glu.h>
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 // --------------------------------------------------------------------------
 Viewport3D::Viewport3D(HWND parent, HINSTANCE hInstance) {
@@ -268,6 +269,7 @@ void Viewport3D::render() {
     drawWireframe();
     drawToolpaths();
     if (m_dragSelecting) drawSelectionWindowOverlay();
+    drawSnapOverlay();
 
     SwapBuffers(m_hDC);
 }
@@ -314,6 +316,7 @@ static constexpr int   kAxisTickInterval      = 10;    // draw a tick every N to
 // Right-click interaction constants
 static constexpr int    kContextMenuThreshold = 5;     // px radius below which RMB is a click, not a pan
 static constexpr double kRayPlaneEpsilon      = 1e-10; // near-zero threshold for ray/Z=0 plane check
+static constexpr double kSnapPosEpsilon        = 1e-6; // world-space equality threshold for snap-change redraws
 
 // --------------------------------------------------------------------------
 void Viewport3D::drawGrid() {
@@ -821,6 +824,84 @@ void Viewport3D::drawSelectionWindowOverlay() {
 }
 
 // --------------------------------------------------------------------------
+void Viewport3D::drawSnapOverlay() {
+    if (!m_hasSnap || m_snapResult.type == SnapType::None) return;
+
+    double sx = 0.0, sy = 0.0, sz = 0.0;
+    if (!projectPoint(m_snapResult.position, sx, sy, sz)) return;
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    RECT rc{};
+    GetClientRect(m_hwnd, &rc);
+    glOrtho(0.0, static_cast<double>(std::max(1L, rc.right - rc.left)),
+            static_cast<double>(std::max(1L, rc.bottom - rc.top)), 0.0, -1.0, 1.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glLineWidth(2.0f);
+    glColor3f(1.0f, 0.95f, 0.20f);
+
+    const double x = sx;
+    const double y = sy;
+    const double r = 6.0;
+
+    switch (m_snapResult.type) {
+    case SnapType::Endpoint:
+        glBegin(GL_LINE_LOOP);
+        glVertex2d(x - r, y - r); glVertex2d(x + r, y - r);
+        glVertex2d(x + r, y + r); glVertex2d(x - r, y + r);
+        glEnd();
+        break;
+    case SnapType::Midpoint:
+        glBegin(GL_LINE_LOOP);
+        glVertex2d(x,     y - r);
+        glVertex2d(x + r, y + r);
+        glVertex2d(x - r, y + r);
+        glEnd();
+        break;
+    case SnapType::ArcCenter: {
+        glBegin(GL_LINE_LOOP);
+        constexpr int kSegs = 20;
+        for (int i = 0; i < kSegs; ++i) {
+            double a = (2.0 * std::numbers::pi_v<double> * i) / kSegs;
+            glVertex2d(x + r * std::cos(a), y + r * std::sin(a));
+        }
+        glEnd();
+        break;
+    }
+    case SnapType::Quadrant:
+        glBegin(GL_LINE_LOOP);
+        glVertex2d(x,     y - r);
+        glVertex2d(x + r, y);
+        glVertex2d(x,     y + r);
+        glVertex2d(x - r, y);
+        glEnd();
+        break;
+    case SnapType::Intersection:
+        glBegin(GL_LINES);
+        glVertex2d(x - r, y - r); glVertex2d(x + r, y + r);
+        glVertex2d(x - r, y + r); glVertex2d(x + r, y - r);
+        glEnd();
+        break;
+    default:
+        break;
+    }
+
+    glLineWidth(1.0f);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
+// --------------------------------------------------------------------------
 bool Viewport3D::entityMatchesFilter(const WfEntity& e) const {
     switch (m_selectionFilter) {
     case SelectionFilter::All:    return true;
@@ -849,6 +930,72 @@ bool Viewport3D::projectPoint(const Geom::Vec3& p, double& sx, double& sy, doubl
     sy = viewport[3] - py;
     sz = pz;
     return true;
+}
+
+// --------------------------------------------------------------------------
+bool Viewport3D::worldPointOnConstructionPlane(int screenX, int screenY, Geom::Vec3& out) const {
+    if (!m_hGLRC) return false;
+    wglMakeCurrent(m_hDC, m_hGLRC);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef(-m_camera.panX, -m_camera.panY, -m_camera.distance);
+    glRotatef(m_camera.orbitX, 1, 0, 0);
+    glRotatef(m_camera.orbitY, 0, 0, 1);
+
+    GLint viewport[4] = {};
+    GLdouble modelview[16] = {};
+    GLdouble projection[16] = {};
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    glGetDoublev(GL_MODELVIEW_MATRIX, modelview);
+    glGetDoublev(GL_PROJECTION_MATRIX, projection);
+
+    const GLdouble winX = static_cast<GLdouble>(screenX);
+    const GLdouble winY = static_cast<GLdouble>(viewport[3] - screenY);
+
+    GLdouble wx0 = 0.0, wy0 = 0.0, wz0 = 0.0;
+    GLdouble wx1 = 0.0, wy1 = 0.0, wz1 = 0.0;
+    if (!gluUnProject(winX, winY, 0.0, modelview, projection, viewport, &wx0, &wy0, &wz0))
+        return false;
+    if (!gluUnProject(winX, winY, 1.0, modelview, projection, viewport, &wx1, &wy1, &wz1))
+        return false;
+
+    const double dz = wz1 - wz0;
+    if (std::abs(dz) <= kRayPlaneEpsilon) {
+        if (std::abs(wz0) <= kRayPlaneEpsilon) {
+            out = { wx0, wy0, wz0 };
+            return true;
+        }
+        return false;
+    }
+    const double t = -wz0 / dz;
+    out = { wx0 + t * (wx1 - wx0),
+            wy0 + t * (wy1 - wy0),
+            0.0 };
+    return true;
+}
+
+// --------------------------------------------------------------------------
+void Viewport3D::zoomTowardScreenPoint(int screenX, int screenY, float ticks, bool precisionMode) {
+    static constexpr float kZoomFraction = 0.12f;
+    static constexpr float kPrecisionZoomFraction = 0.04f;
+
+    Geom::Vec3 before{};
+    const bool hasBefore = worldPointOnConstructionPlane(screenX, screenY, before);
+
+    float frac = precisionMode ? kPrecisionZoomFraction : kZoomFraction;
+    float zoomStep = m_camera.distance * frac * ticks;
+    m_camera.distance -= zoomStep;
+    if (m_camera.distance < 1.0f) m_camera.distance = 1.0f;
+
+    if (!hasBefore) return;
+
+    Geom::Vec3 after{};
+    if (!worldPointOnConstructionPlane(screenX, screenY, after)) return;
+
+    // Keep the same world-space target under the cursor after zoom.
+    m_camera.panX += static_cast<float>(before.x - after.x);
+    m_camera.panY += static_cast<float>(before.y - after.y);
 }
 
 // --------------------------------------------------------------------------
@@ -1204,42 +1351,34 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             }
         }
 
-        // Fire live-coordinate callback: unproject screen point to world space
-        // and intersect the resulting ray with the Z=0 construction plane.
-        if (m_coordCb && m_hGLRC) {
-            wglMakeCurrent(m_hDC, m_hGLRC);
+        Geom::Vec3 cursorWorld{};
+        const bool hasCursorWorld = worldPointOnConstructionPlane(x, y, cursorWorld);
 
-            GLint    viewport[4]  = {};
-            GLdouble modelview[16]  = {};
-            GLdouble projection[16] = {};
-            glGetIntegerv(GL_VIEWPORT,        viewport);
-            glGetDoublev (GL_MODELVIEW_MATRIX,  modelview);
-            glGetDoublev (GL_PROJECTION_MATRIX, projection);
+        if (m_coordCb && hasCursorWorld) {
+            m_coordCb(cursorWorld.x, cursorWorld.y, cursorWorld.z);
+        }
 
-            // Flip Y: OpenGL origin is at bottom-left, Windows at top-left
-            GLdouble winX = static_cast<GLdouble>(x);
-            GLdouble winY = static_cast<GLdouble>(viewport[3] - y);
+        if (!m_leftDown && !m_midDown && !m_rightDown && m_wfScene && hasCursorWorld) {
+            const SnapResult snap = AutoCursor::findSnap(*m_wfScene, cursorWorld);
+            const bool hasSnap = (snap.type != SnapType::None);
 
-            GLdouble wx0, wy0, wz0;  // near-plane intersection
-            GLdouble wx1, wy1, wz1;  // far-plane intersection
-            gluUnProject(winX, winY, 0.0, modelview, projection, viewport,
-                         &wx0, &wy0, &wz0);
-            gluUnProject(winX, winY, 1.0, modelview, projection, viewport,
-                         &wx1, &wy1, &wz1);
-
-            // Ray–plane intersection: find t where z == 0
-            double dz = wz1 - wz0;
-            double wx, wy, wz;
-            if (std::abs(dz) > kRayPlaneEpsilon) {
-                double t = -wz0 / dz;
-                wx = wx0 + t * (wx1 - wx0);
-                wy = wy0 + t * (wy1 - wy0);
-                wz = 0.0;
-            } else {
-                // Ray is parallel to z=0; report near-plane point
-                wx = wx0; wy = wy0; wz = wz0;
+            bool changed = (hasSnap != m_hasSnap);
+            if (!changed && hasSnap) {
+                changed = (snap.type != m_snapResult.type) ||
+                          (std::abs(snap.position.x - m_snapResult.position.x) > kSnapPosEpsilon) ||
+                          (std::abs(snap.position.y - m_snapResult.position.y) > kSnapPosEpsilon) ||
+                          (std::abs(snap.position.z - m_snapResult.position.z) > kSnapPosEpsilon);
             }
-            m_coordCb(wx, wy, wz);
+
+            if (changed) {
+                m_hasSnap = hasSnap;
+                if (hasSnap) m_snapResult = snap;
+                redraw();
+            }
+        } else if (m_hasSnap) {
+            m_hasSnap = false;
+            m_snapResult = {};
+            redraw();
         }
         return 0;
     }
@@ -1254,13 +1393,10 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             // Ctrl+Shift+Wheel → horizontal pan
             m_camera.panX += ticks * 10.0f;
         } else {
-            // Wheel zoom: stepped increment; Ctrl+wheel reduces increment for precision.
-            static constexpr float kZoomFraction = 0.12f;
-            static constexpr float kPrecisionZoomFraction = 0.04f;
-            float frac = ctrl ? kPrecisionZoomFraction : kZoomFraction;
-            float zoomStep = m_camera.distance * frac * ticks;
-            m_camera.distance -= zoomStep;
-            if (m_camera.distance < 1.0f) m_camera.distance = 1.0f;
+            // Wheel zoom targets the cursor position on the construction plane.
+            POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            ScreenToClient(m_hwnd, &pt);
+            zoomTowardScreenPoint(pt.x, pt.y, ticks, ctrl);
         }
         redraw();
         return 0;

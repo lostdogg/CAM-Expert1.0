@@ -210,6 +210,7 @@ constexpr int IDM_CTX_FRONT           = 7102;  // Front View
 constexpr int IDM_CTX_TOP             = 7103;  // Top View
 constexpr int IDM_CTX_RIGHT           = 7104;  // Right View
 constexpr int IDM_CTX_CLEAR_COLORS    = 7105;  // Clear Colors (reset entity colours)
+constexpr int IDM_CTX_CHANGE_COLOR    = 7106;  // Change Color (selected entities)
 constexpr int IDM_HELP_ABOUT      = 9001;
 constexpr int IDM_COPILOT_TOGGLE  = 9002;  // Toggle the AI Copilot panel
 constexpr int IDM_HELP_TOPICS     = 9003;  // F1 – Open help topics
@@ -416,6 +417,7 @@ private:
     // --- Unit / coordinate display ---
     void unitToggle();                                         // IDM_UNIT_TOGGLE
     void updateCoordinateDisplay(double x, double y, double z);// update X/Y/Z status bar panes
+    void updateSnapDisplay(const SnapResult& snap);            // update snap-pane text
     void updateUnitPane();                                     // refresh the unit pane text
 
     // --- Right-click context menu ---
