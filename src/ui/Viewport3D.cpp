@@ -299,6 +299,10 @@ static constexpr float kMinAxisLength         = 0.5f;  // minimum length to trea
 static constexpr double kToolAxisTickLength   = 8.0;   // mm – length of tool-axis tick marks
 static constexpr int   kAxisTickInterval      = 10;    // draw a tick every N toolpath points
 
+// Right-click interaction constants
+static constexpr int    kContextMenuThreshold = 5;     // px radius below which RMB is a click, not a pan
+static constexpr double kRayPlaneEpsilon      = 1e-10; // near-zero threshold for ray/Z=0 plane check
+
 // --------------------------------------------------------------------------
 void Viewport3D::drawGrid() {
     glDisable(GL_LIGHTING);
@@ -903,7 +907,6 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         // and fire the context menu callback.
         int dxCtx = LOWORD(lParam) - m_rightClickStartX;
         int dyCtx = HIWORD(lParam) - m_rightClickStartY;
-        static constexpr int kContextMenuThreshold = 5;
         if (m_contextMenuCb &&
             dxCtx * dxCtx + dyCtx * dyCtx <= kContextMenuThreshold * kContextMenuThreshold) {
             POINT pt = { LOWORD(lParam), HIWORD(lParam) };
@@ -960,7 +963,7 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             // Ray–plane intersection: find t where z == 0
             double dz = wz1 - wz0;
             double wx, wy, wz;
-            if (std::abs(dz) > 1e-10) {
+            if (std::abs(dz) > kRayPlaneEpsilon) {
                 double t = -wz0 / dz;
                 wx = wx0 + t * (wx1 - wx0);
                 wy = wy0 + t * (wy1 - wy0);

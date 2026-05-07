@@ -156,6 +156,13 @@ static bool parseDouble(const wchar_t* buf, double& out) {
 // Named constant for π used in circumference and polygon calculations
 static constexpr double kPi = 3.14159265358979323846;
 
+// Coordinate conversion constant (mm per inch)
+static constexpr double kMmPerInch = 25.4;
+
+// Threshold (pixels²) below which a right-click with minimal mouse movement
+// is treated as a context-menu click rather than a pan gesture.
+static constexpr int kContextMenuThresholdSq = 25; // 5 px radius
+
 // --------------------------------------------------------------------------
 MainWindow::MainWindow() = default;
 MainWindow::~MainWindow() {
@@ -3568,7 +3575,6 @@ void MainWindow::updateCoordinateDisplay(double x, double y, double z) {
     if (!m_hStatusBar) return;
 
     // Convert from mm to inches when in imperial mode
-    static constexpr double kMmPerInch = 25.4;
     double displayX = m_useMetric ? x : x / kMmPerInch;
     double displayY = m_useMetric ? y : y / kMmPerInch;
     double displayZ = m_useMetric ? z : z / kMmPerInch;
