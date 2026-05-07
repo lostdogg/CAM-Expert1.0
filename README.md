@@ -9,7 +9,7 @@ It also includes a built-in **AI Copilot** pipeline for natural-language CAM ass
 ## Table of Contents
 
 - [1) Project at a glance](#1-project-at-a-glance)
-- [2) What’s implemented](#2-whats-implemented)
+- [2) Feature status](#2-feature-status)
 - [3) UI and workflow model](#3-ui-and-workflow-model)
 - [4) Keyboard shortcuts](#4-keyboard-shortcuts)
 - [5) Architecture](#5-architecture)
@@ -43,47 +43,96 @@ It also includes a built-in **AI Copilot** pipeline for natural-language CAM ass
 
 ---
 
-## 2) What’s implemented
+## 2) Feature status
+
+The table below classifies every major feature into one of four tiers, based on what is actually present in the source tree.
+
+| Tier | Meaning |
+|---|---|
+| ✅ **Implemented** | Real, working code with meaningful logic — not just a skeleton. |
+| 🧪 **Experimental** | Core algorithm is present but some sub-paths are incomplete, delegate to simplified behaviour, or have known edge-case gaps. |
+| 🔧 **Stub / in-progress** | Architectural placeholder: interface and registration exist; bodies return representative/dummy results or emit a "not implemented" message. |
+| 📋 **Planned** | No code yet — feature listed here so contributors know it is on the roadmap. |
+
+---
 
 ### CAD / geometry
-- Wireframe scene with points, lines, arcs, circles, polygons, splines, ellipses, helix/spiral, and extraction/modification tools.
-- NURBS surface support with tessellation/evaluation.
-- B-Rep solids and solid operations (constructive + boolean style workflows).
-- Mesh support (STL/OBJ) and mesh-driven operations.
-- File importer architecture for multiple format families.
-- Model-prep and feature-recognition foundations.
-- Constraint solver module for sketch/edit workflows.
+
+| Feature | Status | Notes |
+|---|---|---|
+| Wireframe scene (points, lines, arcs, circles, polygons, splines, ellipses, helix/spiral) | ✅ Implemented | Full entity management, construction-plane helpers, coordinate transforms. |
+| NURBS surface evaluation and tessellation | ✅ Implemented | Cox–de Boor basis, tangent computation, full surface eval loop. |
+| B-Rep solid topology | ✅ Implemented | Vertices, edges, faces, hole detection. |
+| Mesh support — STL (ASCII + binary) and OBJ import | ✅ Implemented | Bounding box, centroid, surface-area, degenerate-triangle removal. |
+| Feature recognition (holes, pockets, bosses, slots) | ✅ Implemented | Returns feature type and strategy recommendations. |
+| Constraint solver | ✅ Implemented | Add/remove constraints, sketch entity reference resolution. |
+| STEP (.step / .stp) importer | ✅ Implemented | Parses entities, derives representative B-Rep geometry. |
+| IGES (.igs / .iges) importer | ✅ Implemented | Parses parameter records, derives representative geometry. |
+| STL / OBJ importer | ✅ Implemented | Native ASCII and binary STL; Wavefront OBJ. |
+| Parasolid (.x_t / .x_b) import bridge | 🔧 Stub | Interface wired; body prints a "kernel-accurate reader can be plugged in" message. |
+| SolidWorks (.sldprt), CATIA, Siemens NX, Solid Edge, Rhino (.3dm), ACIS (.sat) importers | 🔧 Stub | Registered via `StubPreciseImporter`; return placeholder geometry + a descriptive message. |
+| 3MF and AMF importers | 🔧 Stub | Files registered; bodies return "not implemented yet". |
+| Model prep — fillet/chamfer removal, surface healing | 🧪 Experimental | Removal and healing logic present; mesh simplification body contains a placeholder comment (no Garland–Heckbert yet). |
+| Wireframe `Intersection` entity | 📋 Planned | Type enumerated in `WireframeScene.h`; no construction or query logic yet. |
+
+---
 
 ### CAM strategies
-- **2D / 2.5D:** contour, pocket, face mill, drilling, chamfer, thread mill.
-- **Dynamic motion:** adaptive/trochoidal style motion patterns.
-- **3D:** waterline (Z-level), raster, scallop, spiral.
-- **Multi-axis:** swarf, normal-to-surface, rotary wrap, lead/lag, IK helpers, singularity smoothing, inverse-time feed helpers.
-- **Turning / mill-turn / swiss:** dedicated strategy modules.
-- **Probing cycles:** Z-surface, bore/boss center, corner.
-- **Toolpath transforms:** dynamic plane + geometric transform utilities.
+
+| Feature | Status | Notes |
+|---|---|---|
+| 2D / 2.5D: contour, pocket, face mill, drilling, chamfer, thread mill | ✅ Implemented | Contour passes with parametric lead-in/out arcs; full depth/step-over loop. |
+| 3D: waterline (Z-level), raster, scallop | ✅ Implemented | Ray–triangle intersection (Möller–Trumbore), Z-map and surface-deviation passes. |
+| Multi-axis: swarf, normal-to-surface, rotary wrap, lead/lag, IK helpers | ✅ Implemented | Inverse kinematics, 5-axis orientation resolution, head-table and table-table kinematics. |
+| Turning (rough + finish) | ✅ Implemented | Multiple radial passes with depth-of-cut control. |
+| Mill-turn (dual-turret) | ✅ Implemented | Per-channel G-code generation with synchronisation wait codes. |
+| Toolpath data model | ✅ Implemented | Total length, time estimation, bounding box, point storage. |
+| Dynamic plane (construction plane snap + translate) | ✅ Implemented | Face-normal derivation, local-axis translations. |
+| Dynamic / HSM / trochoidal motion patterns | 🧪 Experimental | Core motion geometry present; `buildFromMaterial` delegates to passed-in parameters rather than performing its own material-lookup logic. |
+| Swiss sliding-headstock machining | 🧪 Experimental | Headstock feed mechanics and pinch-mode XSign implemented; complex sub-spindle synchronisation still maturing. |
+| Probing cycles (Z-surface, bore/boss centre, corner) | 🧪 Experimental | Probe approach/retract and WCS register updates work; macro-variable expansion has edge-case gaps. |
+| Toolpath transforms (mirror, rotate, work-offset sequences, subprograms) | 🧪 Experimental | Matrix transforms and offset sequences functional; subprogram body generation is in progress. |
+| 3D spiral strategy | 📋 Planned | Listed in documentation and ribbon UI; no generation code present yet. |
+
+---
 
 ### Simulation and verification
-- **Backplot:** path animation/visual verification.
-- **Verify:** stock/deviation/gouge-oriented checks.
-- **Machine simulation:** kinematic machine behavior checks.
+
+| Feature | Status | Notes |
+|---|---|---|
+| Backplot (path animation / visual verification) | ✅ Implemented | Move sequencing from `ToolpathManager`; full forward-plot build loop. |
+| Verify (stock Z-map gouge / undercut analysis) | ✅ Implemented | Z-map collision detection, deviation reporting. |
+| Machine simulation (kinematic machine checks) | ✅ Implemented | Pre-built 3-, 4-, and 5-axis machine configurations with component definitions. |
+
+---
 
 ### Post-processing and NC output
-- Internal NCI format support.
-- Post processor module with profile/script-oriented customization path.
-- Controller families represented in code/docs (Fanuc/Haas/Heidenhain/etc. style targets).
+
+| Feature | Status | Notes |
+|---|---|---|
+| NCI format serialisation | ✅ Implemented | 5-axis tool-axis vectors, full motion-type mapping. |
+| Post processor (G-code generation) | ✅ Implemented | Script-profile loading, motion-to-code conversion, Fanuc/Haas/Heidenhain style targets. |
+| Material library | ✅ Implemented | Material properties, feed/speed recommendations. |
+| SQL tool database | ✅ Implemented | Schema DDL, tool and material table definitions. |
+| Cloud tool library (manufacturer digital twins) | ✅ Implemented | Sandvik, Kennametal, and others with manufacturer specifications. |
+
+---
 
 ### AI Copilot subsystem (`src/copilot`)
-- `IntentParser` for NL intent extraction.
-- `ContextBuffer` for live CAM context snapshots.
-- `ParameterNegotiator` for strategy/material/tool parameter shaping.
-- `ConstrainedOutputValidator` for safety/feasibility checks and corrections.
-- `LocalInferenceEngine` for local model-backed enhancement (rule fallback available).
-- `VectorDatabase` for RAG-like recall.
-- `GeometricTokenizer` for geometry/context packing.
-- `SelfCorrectionLoop` for iterative correction.
-- `AuditLog` for traceability.
-- `CopilotEngine` orchestrates parse → negotiate → validate → suggest → apply.
+
+| Feature | Status | Notes |
+|---|---|---|
+| `CopilotEngine` orchestration (parse → negotiate → validate → apply) | ✅ Implemented | Full inference loop with context refresh and audit logging. |
+| `IntentParser` (natural-language intent extraction) | ✅ Implemented | Action / target / parameter extraction; material and strategy hint classification. |
+| `ContextBuffer` (live CAM context snapshots) | ✅ Implemented | Snapshot construction from `ToolpathManager`. |
+| `ParameterNegotiator` (strategy / material / tool shaping) | ✅ Implemented | Material resolution, strategy selection, feed/speed negotiation. |
+| `ConstrainedOutputValidator` (safety / feasibility checks) | ✅ Implemented | Radial engagement validation, feed/speed constraint enforcement. |
+| `VectorDatabase` (RAG-style knowledge recall) | ✅ Implemented | Knowledge base with tagging, CSV import/export, similarity search. |
+| `GeometricTokenizer` (geometry → text encoding) | ✅ Implemented | Feature tokenisation, geometry-to-text encoding. |
+| `SelfCorrectionLoop` (iterative gouge/undercut correction) | ✅ Implemented | Step-reduction logic, correction proposal generation. |
+| `AuditLog` (traceability) | ✅ Implemented | Entry formatting, session tracking, timestamp management. |
+| `LocalInferenceEngine` hardware detection (AVX2 / AVX-512 / AMX) | ✅ Implemented | CPUID detection on MSVC and GCC/Clang. |
+| `LocalInferenceEngine` ML model inference | 🧪 Experimental | Hardware path detected and branched; actual model loading is not present — falls back to rule-based logic. |
 
 ---
 
@@ -410,4 +459,3 @@ The repository currently contains version markers across multiple components (pr
 
 ---
 
-If you want, I can also generate a second, role-based README variant (operator-focused quickstart + developer-focused architecture guide split) in this same repository.
