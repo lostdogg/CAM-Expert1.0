@@ -6,13 +6,14 @@
 #include "../cad/WireframeScene.h"
 #include <gl/gl.h>
 #include <gl/glu.h>
+#include <algorithm>
 #include <cmath>
 
 // --------------------------------------------------------------------------
 Viewport3D::Viewport3D(HWND parent, HINSTANCE hInstance) {
     WNDCLASSEXW wc{};
     wc.cbSize        = sizeof(wc);
-    wc.style         = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
+    wc.style         = CS_HREDRAW | CS_VREDRAW | CS_OWNDC | CS_DBLCLKS;
     wc.lpfnWndProc   = ViewportProc;
     wc.hInstance     = hInstance;
     wc.hCursor       = LoadCursor(nullptr, IDC_CROSS);
@@ -57,7 +58,7 @@ void Viewport3D::setSurfacesManager(const SurfacesManager* mgr) {
 }
 
 // --------------------------------------------------------------------------
-void Viewport3D::setWireframeScene(const WireframeScene* scene) {
+void Viewport3D::setWireframeScene(WireframeScene* scene) {
     m_wfScene = scene;
     redraw();
 }
@@ -182,6 +183,16 @@ void Viewport3D::toggleGnomon() {
 }
 
 // --------------------------------------------------------------------------
+void Viewport3D::setSelectionFilter(SelectionFilter filter) {
+    m_selectionFilter = filter;
+}
+
+// --------------------------------------------------------------------------
+void Viewport3D::setSelectionMode(bool selectMode) {
+    m_selectMode = selectMode;
+}
+
+// --------------------------------------------------------------------------
 void Viewport3D::zoomSelected() {
     // No selection system yet; zoom to a tight fit of the visible scene
     m_camera.distance = 180.0f;
@@ -256,6 +267,7 @@ void Viewport3D::render() {
     drawSurfaces();
     drawWireframe();
     drawToolpaths();
+    if (m_dragSelecting) drawSelectionWindowOverlay();
 
     SwapBuffers(m_hDC);
 }
@@ -624,24 +636,25 @@ void Viewport3D::drawWireframe() {
     for (int entityIdx = 0; entityIdx < static_cast<int>(entities.size()); ++entityIdx) {
         const WfEntity& e = entities[entityIdx];
         bool selected = m_wfScene->isSelected(entityIdx);
+        bool hovered  = (entityIdx == m_hoverEntity);
 
         switch (e.type) {
 
         case WfEntityType::Point:
-            glColor3f(selected ? kSelR : 1.0f,
-                      selected ? kSelG : 1.0f,
-                      selected ? kSelB : 0.0f);   // gold or yellow
-            glPointSize(selected ? kPointSz + 2.0f : kPointSz);
+            glColor3f(selected ? kSelR : (hovered ? 0.95f : 1.0f),
+                      selected ? kSelG : (hovered ? 0.95f : 1.0f),
+                      selected ? kSelB : (hovered ? 0.30f : 0.0f));   // gold/hover/yellow
+            glPointSize(selected ? kPointSz + 2.0f : (hovered ? kPointSz + 1.0f : kPointSz));
             glBegin(GL_POINTS);
             glVertex3d(e.p0.x, e.p0.y, e.p0.z);
             glEnd();
             break;
 
         case WfEntityType::Line:
-            glColor3f(selected ? kSelR : 0.0f,
+            glColor3f(selected ? kSelR : (hovered ? 0.3f : 0.0f),
                       selected ? kSelG : 1.0f,
-                      selected ? kSelB : 0.8f);   // gold or cyan
-            glLineWidth(selected ? 2.5f : 1.5f);
+                      selected ? kSelB : (hovered ? 1.0f : 0.8f));   // gold/hover/cyan
+            glLineWidth(selected ? 2.5f : (hovered ? 2.2f : 1.5f));
             glBegin(GL_LINES);
             glVertex3d(e.p0.x, e.p0.y, e.p0.z);
             glVertex3d(e.p1.x, e.p1.y, e.p1.z);
@@ -650,10 +663,10 @@ void Viewport3D::drawWireframe() {
             break;
 
         case WfEntityType::Arc: {
-            glColor3f(selected ? kSelR : 0.6f,
+            glColor3f(selected ? kSelR : (hovered ? 0.8f : 0.6f),
                       selected ? kSelG : 1.0f,
-                      selected ? kSelB : 0.2f);   // gold or lime
-            glLineWidth(selected ? 2.5f : 1.5f);
+                      selected ? kSelB : (hovered ? 0.4f : 0.2f));   // gold/hover/lime
+            glLineWidth(selected ? 2.5f : (hovered ? 2.2f : 1.5f));
             glBegin(GL_LINE_STRIP);
             double span = e.endAngle - e.startAngle;
             // Ensure we always sweep the short (CCW) way around.
@@ -673,10 +686,10 @@ void Viewport3D::drawWireframe() {
         }
 
         case WfEntityType::Circle: {
-            glColor3f(selected ? kSelR : 0.6f,
+            glColor3f(selected ? kSelR : (hovered ? 0.8f : 0.6f),
                       selected ? kSelG : 1.0f,
-                      selected ? kSelB : 0.2f);   // gold or lime
-            glLineWidth(selected ? 2.5f : 1.5f);
+                      selected ? kSelB : (hovered ? 0.4f : 0.2f));   // gold/hover/lime
+            glLineWidth(selected ? 2.5f : (hovered ? 2.2f : 1.5f));
             glBegin(GL_LINE_LOOP);
             for (int i = 0; i < kArcSegs; ++i) {
                 double t  = kTwoPi * i / kArcSegs;
@@ -690,10 +703,10 @@ void Viewport3D::drawWireframe() {
         }
 
         case WfEntityType::Ellipse: {
-            glColor3f(selected ? kSelR : 0.8f,
-                      selected ? kSelG : 0.6f,
-                      selected ? kSelB : 1.0f);   // gold or lavender
-            glLineWidth(selected ? 2.5f : 1.5f);
+            glColor3f(selected ? kSelR : (hovered ? 0.9f : 0.8f),
+                      selected ? kSelG : (hovered ? 0.8f : 0.6f),
+                      selected ? kSelB : 1.0f);   // gold/hover/lavender
+            glLineWidth(selected ? 2.5f : (hovered ? 2.2f : 1.5f));
             glBegin(GL_LINE_LOOP);
             for (int i = 0; i < kArcSegs; ++i) {
                 double t  = kTwoPi * i / kArcSegs;
@@ -711,9 +724,9 @@ void Viewport3D::drawWireframe() {
             // polyline approximation of the spline.
             if (e.pts.size() >= 2) {
                 glColor3f(selected ? kSelR : 1.0f,
-                          selected ? kSelG : 0.7f,
-                          selected ? kSelB : 0.0f);   // gold or orange
-                glLineWidth(selected ? 2.5f : 1.5f);
+                          selected ? kSelG : (hovered ? 0.85f : 0.7f),
+                          selected ? kSelB : (hovered ? 0.2f : 0.0f));   // gold/hover/orange
+                glLineWidth(selected ? 2.5f : (hovered ? 2.2f : 1.5f));
                 glBegin(GL_LINE_STRIP);
                 for (const auto& cp : e.pts)
                     glVertex3d(cp.x, cp.y, cp.z);
@@ -734,8 +747,8 @@ void Viewport3D::drawWireframe() {
             if (!e.pts.empty()) {
                 glColor3f(selected ? kSelR : 0.0f,
                           selected ? kSelG : 1.0f,
-                          selected ? kSelB : 0.8f);   // gold or cyan
-                glLineWidth(selected ? 2.5f : 1.5f);
+                          selected ? kSelB : (hovered ? 1.0f : 0.8f));   // gold/hover/cyan
+                glLineWidth(selected ? 2.5f : (hovered ? 2.2f : 1.5f));
                 glBegin(GL_LINE_LOOP);
                 for (const auto& v : e.pts)
                     glVertex3d(v.x, v.y, v.z);
@@ -746,9 +759,9 @@ void Viewport3D::drawWireframe() {
 
         case WfEntityType::Helix: {
             glColor3f(selected ? kSelR : 1.0f,
-                      selected ? kSelG : 0.5f,
-                      selected ? kSelB : 0.2f);   // gold or coral
-            glLineWidth(selected ? 2.5f : 1.5f);
+                      selected ? kSelG : (hovered ? 0.65f : 0.5f),
+                      selected ? kSelB : 0.2f);   // gold/hover/coral
+            glLineWidth(selected ? 2.5f : (hovered ? 2.2f : 1.5f));
             static constexpr int kHelixSegs = 32;  // segments per revolution
             int totalSegs = static_cast<int>(e.revolutions * kHelixSegs);
             if (totalSegs < 2) totalSegs = 2;
@@ -772,6 +785,192 @@ void Viewport3D::drawWireframe() {
     glLineWidth(1.0f);
     glPointSize(1.0f);
     glEnable(GL_LIGHTING);
+}
+
+// --------------------------------------------------------------------------
+void Viewport3D::drawSelectionWindowOverlay() {
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    RECT rc{};
+    GetClientRect(m_hwnd, &rc);
+    glOrtho(0.0, static_cast<double>(std::max(1L, rc.right - rc.left)),
+            static_cast<double>(std::max(1L, rc.bottom - rc.top)), 0.0, -1.0, 1.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glLineWidth(1.0f);
+    glColor3f(0.95f, 0.90f, 0.25f);
+
+    glBegin(GL_LINE_LOOP);
+    glVertex2i(m_selectStartX, m_selectStartY);
+    glVertex2i(m_selectEndX,   m_selectStartY);
+    glVertex2i(m_selectEndX,   m_selectEndY);
+    glVertex2i(m_selectStartX, m_selectEndY);
+    glEnd();
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
+// --------------------------------------------------------------------------
+bool Viewport3D::entityMatchesFilter(const WfEntity& e) const {
+    switch (m_selectionFilter) {
+    case SelectionFilter::All:    return true;
+    case SelectionFilter::Points: return e.type == WfEntityType::Point;
+    case SelectionFilter::Lines:  return e.type == WfEntityType::Line;
+    case SelectionFilter::Arcs:   return e.type == WfEntityType::Arc || e.type == WfEntityType::Circle;
+    case SelectionFilter::Splines:return e.type == WfEntityType::Spline;
+    case SelectionFilter::None:   return false;
+    default:                      return true; // unsupported filters default to permissive
+    }
+}
+
+// --------------------------------------------------------------------------
+bool Viewport3D::projectPoint(const Geom::Vec3& p, double& sx, double& sy, double& sz) const {
+    if (!m_hGLRC) return false;
+    GLint viewport[4] = {};
+    GLdouble modelview[16] = {};
+    GLdouble projection[16] = {};
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    glGetDoublev(GL_MODELVIEW_MATRIX, modelview);
+    glGetDoublev(GL_PROJECTION_MATRIX, projection);
+    GLdouble px = 0.0, py = 0.0, pz = 0.0;
+    if (!gluProject(p.x, p.y, p.z, modelview, projection, viewport, &px, &py, &pz))
+        return false;
+    sx = px;
+    sy = viewport[3] - py;
+    sz = pz;
+    return true;
+}
+
+// --------------------------------------------------------------------------
+std::vector<Geom::Vec3> Viewport3D::sampleEntityPoints(const WfEntity& e) const {
+    std::vector<Geom::Vec3> pts;
+    static constexpr int kArcSegs = 24;
+    static constexpr double kTwoPi = 6.28318530717959;
+    switch (e.type) {
+    case WfEntityType::Point:
+        pts.push_back(e.p0);
+        break;
+    case WfEntityType::Line:
+        pts.push_back(e.p0);
+        pts.push_back(e.p1);
+        break;
+    case WfEntityType::Arc: {
+        double span = e.endAngle - e.startAngle;
+        if (span < 0.0) span += kTwoPi;
+        for (int i = 0; i <= kArcSegs; ++i) {
+            double t = e.startAngle + span * i / kArcSegs;
+            pts.push_back({ e.p0.x + e.radius * std::cos(t),
+                            e.p0.y + e.radius * std::sin(t), e.p0.z });
+        }
+        break;
+    }
+    case WfEntityType::Circle:
+    case WfEntityType::Ellipse:
+        for (int i = 0; i <= kArcSegs; ++i) {
+            double t = kTwoPi * i / kArcSegs;
+            double rx = e.radius;
+            double ry = (e.type == WfEntityType::Ellipse) ? e.radius2 : e.radius;
+            pts.push_back({ e.p0.x + rx * std::cos(t), e.p0.y + ry * std::sin(t), e.p0.z });
+        }
+        break;
+    case WfEntityType::Spline:
+    case WfEntityType::Rectangle:
+    case WfEntityType::Polygon:
+        pts = e.pts;
+        break;
+    case WfEntityType::Helix: {
+        int segs = std::max(8, static_cast<int>(e.revolutions * 24.0));
+        for (int i = 0; i <= segs; ++i) {
+            double u = static_cast<double>(i) / segs;
+            double a = kTwoPi * e.revolutions * u;
+            pts.push_back({ e.p0.x + e.radius * std::cos(a),
+                            e.p0.y + e.radius * std::sin(a),
+                            e.p0.z + e.height * u });
+        }
+        break;
+    }
+    }
+    return pts;
+}
+
+// --------------------------------------------------------------------------
+int Viewport3D::hitTestEntityAt(int x, int y, double tolerancePx) const {
+    if (!m_wfScene || m_wfScene->entityCount() == 0 || !m_hGLRC) return -1;
+    wglMakeCurrent(m_hDC, m_hGLRC);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef(-m_camera.panX, -m_camera.panY, -m_camera.distance);
+    glRotatef(m_camera.orbitX, 1, 0, 0);
+    glRotatef(m_camera.orbitY, 0, 0, 1);
+
+    const auto& entities = m_wfScene->entities();
+    const double tolSq = tolerancePx * tolerancePx;
+    int bestIdx = -1;
+    double best = tolSq;
+
+    for (int i = 0; i < static_cast<int>(entities.size()); ++i) {
+        if (!entityMatchesFilter(entities[i])) continue;
+        auto samples = sampleEntityPoints(entities[i]);
+        for (const auto& p : samples) {
+            double sx = 0.0, sy = 0.0, sz = 0.0;
+            if (!projectPoint(p, sx, sy, sz)) continue;
+            double dx = sx - x;
+            double dy = sy - y;
+            double d2 = dx * dx + dy * dy;
+            if (d2 < best) {
+                best = d2;
+                bestIdx = i;
+            }
+        }
+    }
+    return bestIdx;
+}
+
+// --------------------------------------------------------------------------
+std::vector<int> Viewport3D::collectWindowSelection(int x0, int y0, int x1, int y1, bool crossing) const {
+    std::vector<int> out;
+    if (!m_wfScene || !m_hGLRC) return out;
+    wglMakeCurrent(m_hDC, m_hGLRC);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef(-m_camera.panX, -m_camera.panY, -m_camera.distance);
+    glRotatef(m_camera.orbitX, 1, 0, 0);
+    glRotatef(m_camera.orbitY, 0, 0, 1);
+
+    const int left   = std::min(x0, x1);
+    const int right  = std::max(x0, x1);
+    const int top    = std::min(y0, y1);
+    const int bottom = std::max(y0, y1);
+
+    const auto& entities = m_wfScene->entities();
+    for (int i = 0; i < static_cast<int>(entities.size()); ++i) {
+        const auto& e = entities[i];
+        if (!entityMatchesFilter(e)) continue;
+        auto samples = sampleEntityPoints(e);
+        if (samples.empty()) continue;
+        bool anyInside = false;
+        bool allInside = true;
+        for (const auto& p : samples) {
+            double sx = 0.0, sy = 0.0, sz = 0.0;
+            if (!projectPoint(p, sx, sy, sz)) continue;
+            bool inside = (sx >= left && sx <= right && sy >= top && sy <= bottom);
+            anyInside |= inside;
+            allInside &= inside;
+        }
+        if ((crossing && anyInside) || (!crossing && allInside))
+            out.push_back(i);
+    }
+    return out;
 }
 
 // --------------------------------------------------------------------------
@@ -862,8 +1061,11 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     }
     case WM_LBUTTONDOWN:
         m_leftDown   = true;
-        m_lastMouseX = LOWORD(lParam);
-        m_lastMouseY = HIWORD(lParam);
+        m_selectStartX = m_lastMouseX = LOWORD(lParam);
+        m_selectStartY = m_lastMouseY = HIWORD(lParam);
+        m_selectEndX   = m_selectStartX;
+        m_selectEndY   = m_selectStartY;
+        m_dragSelecting = false;
         // Cancel any ongoing inertia spin when user grabs the model
         if (m_inertiaTimer) {
             KillTimer(m_hwnd, kInertiaTimerId);
@@ -876,16 +1078,56 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_LBUTTONUP:
         m_leftDown = false;
         ReleaseCapture();
-        // Start inertia if there is meaningful velocity
-        if ((m_spinVelX * m_spinVelX + m_spinVelY * m_spinVelY) > kInertiaStop * kInertiaStop) {
-            m_inertiaTimer = SetTimer(m_hwnd, kInertiaTimerId, 16, nullptr); // ~60 fps
+        if (m_wfScene) {
+            const bool crossing = m_selectEndX < m_selectStartX;
+            const int dxSel = m_selectEndX - m_selectStartX;
+            const int dySel = m_selectEndY - m_selectStartY;
+            const bool isBox = (dxSel * dxSel + dySel * dySel) > 16;
+
+            if (isBox) {
+                auto picked = collectWindowSelection(m_selectStartX, m_selectStartY, m_selectEndX, m_selectEndY, crossing);
+                if (m_selectMode) {
+                    m_wfScene->clearSelection();
+                    for (int idx : picked) m_wfScene->selectEntity(idx);
+                } else {
+                    for (int idx : picked) m_wfScene->deselectEntity(idx);
+                }
+            } else {
+                int hit = hitTestEntityAt(LOWORD(lParam), HIWORD(lParam));
+                if (hit >= 0) {
+                    if (m_selectMode) {
+                        auto chain = (m_autoChainEnabled ? m_wfScene->autoChainFrom(hit) : std::vector<int>{});
+                        if (chain.empty()) {
+                            m_wfScene->clearSelection();
+                            m_wfScene->selectEntity(hit);
+                        } else {
+                            m_wfScene->clearSelection();
+                            for (int idx : chain) m_wfScene->selectEntity(idx);
+                        }
+                    } else {
+                        auto chain = (m_autoChainEnabled ? m_wfScene->autoChainFrom(hit) : std::vector<int>{});
+                        if (chain.empty()) {
+                            m_wfScene->deselectEntity(hit);
+                        } else {
+                            for (int idx : chain) m_wfScene->deselectEntity(idx);
+                        }
+                    }
+                } else if (m_selectMode) {
+                    m_wfScene->clearSelection();
+                }
+            }
+            redraw();
         }
+        m_dragSelecting = false;
         return 0;
     case WM_MBUTTONDOWN:
         m_midDown    = true;
         m_lastMouseX = LOWORD(lParam);
         m_lastMouseY = HIWORD(lParam);
         SetCapture(m_hwnd);
+        return 0;
+    case WM_MBUTTONDBLCLK:
+        zoomSelected();
         return 0;
     case WM_MBUTTONUP:
         m_midDown = false;
@@ -919,23 +1161,48 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         int x = LOWORD(lParam), y = HIWORD(lParam);
         int dx = x - m_lastMouseX, dy = y - m_lastMouseY;
         if (m_leftDown) {
-            // Left drag: orbit (dynamic rotation)
-            float vx = dy * 0.5f;
-            float vy = dx * 0.5f;
-            m_camera.orbitX += vx;
-            m_camera.orbitY += vy;
-            // Track velocity for inertia
-            m_spinVelX = vx;
-            m_spinVelY = vy;
+            m_selectEndX = x;
+            m_selectEndY = y;
+            m_dragSelecting = true;
             redraw();
         }
-        if (m_midDown || m_rightDown) {
-            // Middle/right drag: pan
+        if (m_midDown) {
+            bool ctrl  = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            if (ctrl) {
+                // Ctrl + MMB drag: smooth precision zoom
+                float zoomFactor = 1.0f + static_cast<float>(-dy) * 0.01f;
+                if (zoomFactor < 0.1f) zoomFactor = 0.1f;
+                m_camera.distance *= zoomFactor;
+                if (m_camera.distance < 1.0f) m_camera.distance = 1.0f;
+            } else if (shift) {
+                // Shift + MMB drag: pan
+                m_camera.panX -= dx * 0.3f;
+                m_camera.panY += dy * 0.3f;
+            } else {
+                // MMB drag: orbit
+                float vx = dy * 0.5f;
+                float vy = dx * 0.5f;
+                m_camera.orbitX += vx;
+                m_camera.orbitY += vy;
+            }
+            redraw();
+        }
+        if (m_rightDown) {
+            // Right drag: pan
             m_camera.panX -= dx * 0.3f;
             m_camera.panY += dy * 0.3f;
             redraw();
         }
         m_lastMouseX = x; m_lastMouseY = y;
+
+        if (!m_leftDown && !m_midDown && !m_rightDown) {
+            int hover = hitTestEntityAt(x, y, 8.0);
+            if (hover != m_hoverEntity) {
+                m_hoverEntity = hover;
+                redraw();
+            }
+        }
 
         // Fire live-coordinate callback: unproject screen point to world space
         // and intersect the resulting ray with the Z=0 construction plane.
@@ -979,34 +1246,18 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_MOUSEWHEEL: {
         // Determine which modifier keys are held
         bool ctrl  = (GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL) != 0;
-        bool shift = (GET_KEYSTATE_WPARAM(wParam) & MK_SHIFT)   != 0;
         int  delta = GET_WHEEL_DELTA_WPARAM(wParam);
         float ticks = static_cast<float>(delta) / WHEEL_DELTA;
 
         if (ctrl && shift) {
             // Ctrl+Shift+Wheel → horizontal pan
             m_camera.panX += ticks * 10.0f;
-        } else if (ctrl) {
-            // Ctrl+Wheel → rotate around Y axis (yaw / spin)
-            float rot = ticks * 8.0f;
-            m_camera.orbitY += rot;
-            // Kick off a small inertia spin
-            m_spinVelX = 0.0f;
-            m_spinVelY = rot;
-            if (m_inertiaTimer) KillTimer(m_hwnd, kInertiaTimerId);
-            m_inertiaTimer = SetTimer(m_hwnd, kInertiaTimerId, 16, nullptr);
-        } else if (shift) {
-            // Shift+Wheel → rotate around X axis (pitch / tilt)
-            float rot = ticks * 8.0f;
-            m_camera.orbitX += rot;
-            m_spinVelX = rot;
-            m_spinVelY = 0.0f;
-            if (m_inertiaTimer) KillTimer(m_hwnd, kInertiaTimerId);
-            m_inertiaTimer = SetTimer(m_hwnd, kInertiaTimerId, 16, nullptr);
         } else {
-            // Plain wheel → zoom (12% of current distance per notch)
+            // Wheel zoom: stepped increment; Ctrl+wheel reduces increment for precision.
             static constexpr float kZoomFraction = 0.12f;
-            float zoomStep = m_camera.distance * kZoomFraction * ticks;
+            static constexpr float kPrecisionZoomFraction = 0.04f;
+            float frac = ctrl ? kPrecisionZoomFraction : kZoomFraction;
+            float zoomStep = m_camera.distance * frac * ticks;
             m_camera.distance -= zoomStep;
             if (m_camera.distance < 1.0f) m_camera.distance = 1.0f;
         }

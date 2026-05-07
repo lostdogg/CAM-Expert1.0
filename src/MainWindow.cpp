@@ -488,46 +488,41 @@ void MainWindow::onCreate() {
     // Connect the selection bar mask callback to select wireframe entities by type
     if (m_selectionBar) {
         m_selectionBar->setMaskCallback([this](SelectMask mask) {
-            if (m_wfScene) {
-                m_wfScene->clearSelection();
+            if (m_viewport) {
+                SelectionFilter filter = SelectionFilter::All;
                 switch (mask) {
+                case SelectMask::Points:     filter = SelectionFilter::Points; break;
+                case SelectMask::Lines:      filter = SelectionFilter::Lines;  break;
+                case SelectMask::Arcs:       filter = SelectionFilter::Arcs;   break;
+                case SelectMask::Splines:    filter = SelectionFilter::Splines;break;
+                case SelectMask::Surfaces:   filter = SelectionFilter::Surfaces; break;
+                case SelectMask::Solids:     filter = SelectionFilter::Solids; break;
+                case SelectMask::Holes:      filter = SelectionFilter::Holes; break;
+                case SelectMask::PlanarFaces:filter = SelectionFilter::PlanarFaces; break;
+                case SelectMask::None:       filter = SelectionFilter::None;   break;
                 case SelectMask::All:
-                    m_wfScene->selectAll();
-                    break;
-                case SelectMask::Points:
-                    m_wfScene->selectByType(WfEntityType::Point);
-                    break;
-                case SelectMask::Lines:
-                    m_wfScene->selectByType(WfEntityType::Line);
-                    break;
-                case SelectMask::Arcs:
-                    m_wfScene->selectByType(WfEntityType::Arc);
-                    m_wfScene->selectByType(WfEntityType::Circle);
-                    break;
-                case SelectMask::Splines:
-                    m_wfScene->selectByType(WfEntityType::Spline);
-                    break;
-                case SelectMask::None:
-                default:
-                    break;  // clearSelection() already called above
+                default:                     filter = SelectionFilter::All;    break;
                 }
-                if (m_viewport) m_viewport->redraw();
+                m_viewport->setSelectionFilter(filter);
+                m_viewport->redraw();
             }
             const wchar_t* names[] = {
-                L"Mask: All",         L"Mask: Points",       L"Mask: Lines",
-                L"Mask: Arcs",        L"Mask: Splines",      L"Mask: Surfaces",
-                L"Mask: Solids",      L"Mask: Holes",        L"Mask: Planar Faces",
-                L"Mask: None (deselected)"
+                L"Filter lock: All entities",  L"Filter lock: Points",      L"Filter lock: Lines",
+                L"Filter lock: Arcs",          L"Filter lock: Splines",     L"Filter lock: Surfaces",
+                L"Filter lock: Solids",        L"Filter lock: Holes",       L"Filter lock: Planar Faces",
+                L"Filter lock: None"
             };
             int idx = static_cast<int>(mask);
             if (idx >= 0 && idx < 10) {
-                auto sel = m_wfScene ? m_wfScene->selectedIndices() : std::vector<int>{};
                 wchar_t msg[128] = {};
-                std::swprintf(msg, 128, L"%s - %d entity(s) selected.",
-                              names[idx], static_cast<int>(sel.size()));
+                std::swprintf(msg, 128, L"%s.", names[idx]);
                 SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
             }
         });
+        m_viewport->setSelectionFilter(SelectionFilter::All);
+    }
+    if (m_viewport) {
+        m_viewport->setSelectionMode(m_selectionMode);
     }
 
     // --- Copilot ---
@@ -1615,6 +1610,7 @@ void MainWindow::editAnalyze() {
 // --------------------------------------------------------------------------
 void MainWindow::toggleSelectionMode() {
     m_selectionMode = !m_selectionMode;
+    if (m_viewport) m_viewport->setSelectionMode(m_selectionMode);
     const wchar_t* modeName = m_selectionMode ? L"Selection mode: SELECT"
                                                : L"Selection mode: DESELECT";
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
@@ -3029,6 +3025,8 @@ void MainWindow::createWireframe(int commandId) {
     // -----------------------------------------------------------------------
 
     case IDM_WF_LINE: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
+            reinterpret_cast<LPARAM>(L"Draw Line: Specify first point."));
         double x1 = 0, y1 = 0, x2 = 100, y2 = 0;
         if (!promptDouble2(L"Create Line - Start Point",
                            L"X (mm):", x1, x1,
@@ -3105,6 +3103,8 @@ void MainWindow::createWireframe(int commandId) {
     // -----------------------------------------------------------------------
 
     case IDM_WF_CIRCLE: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
+            reinterpret_cast<LPARAM>(L"Draw Circle: Specify center point."));
         double cx = 0, cy = 0, r = 25.0;
         if (!promptTriple(L"Create Circle",
                           L"Centre X (mm):", cx, cx,
@@ -3136,6 +3136,8 @@ void MainWindow::createWireframe(int commandId) {
     }
 
     case IDM_WF_ARC: {
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
+            reinterpret_cast<LPARAM>(L"Draw Arc: Specify first point."));
         double x1 = 0.0, y1 = 0.0;
         double x2 = 50.0, y2 = 0.0;
         double x3 = 25.0, y3 = 25.0;

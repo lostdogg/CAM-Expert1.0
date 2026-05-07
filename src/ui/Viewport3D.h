@@ -31,6 +31,18 @@ class SurfacesManager;
 
 enum class RenderMode { Wireframe, Shaded, Translucent };
 enum class ViewPreset  { Isometric, Front, Top, Right, Back, Bottom, Left };
+enum class SelectionFilter {
+    All,
+    Points,
+    Lines,
+    Arcs,
+    Splines,
+    Surfaces,
+    Solids,
+    Holes,
+    PlanarFaces,
+    None
+};
 
 class Viewport3D {
 public:
@@ -46,6 +58,8 @@ public:
     void zoomSelected();             // F2 – zoom to fit any selected / visible geometry
     void toggleGrid();               // F4 – show/hide the ground grid
     void toggleGnomon();             // F5 – show/hide the dynamic gnomon (axes triad)
+    void setSelectionFilter(SelectionFilter filter);
+    void setSelectionMode(bool selectMode);
 
     // Provide a toolpath manager so the viewport can render toolpaths.
     // The pointer is non-owning; caller is responsible for lifetime.
@@ -63,7 +77,7 @@ public:
     // objects (lines, arcs, circles, splines, polygons, etc.) and show
     // AutoCursor snap highlights on hover.
     // The pointer is non-owning; caller is responsible for lifetime.
-    void setWireframeScene(const WireframeScene* scene);
+    void setWireframeScene(WireframeScene* scene);
 
     RenderMode renderMode() const { return m_renderMode; }
     bool       gridVisible()   const { return m_showGrid; }
@@ -96,6 +110,12 @@ private:
     void drawSurfaces();   // render NURBS surfaces from SurfacesManager
     void drawToolpaths();
     void drawWireframe();  // render all wireframe entities from WireframeScene
+    void drawSelectionWindowOverlay();
+    bool entityMatchesFilter(const WfEntity& e) const;
+    bool projectPoint(const Geom::Vec3& p, double& sx, double& sy, double& sz) const;
+    int  hitTestEntityAt(int x, int y, double tolerancePx = 10.0) const;
+    std::vector<Geom::Vec3> sampleEntityPoints(const WfEntity& e) const;
+    std::vector<int> collectWindowSelection(int x0, int y0, int x1, int y1, bool crossing) const;
 
     // Returns an RGB colour triple for a given motion type
     static void motionColor(MotionType mt, float& r, float& g, float& b);
@@ -113,8 +133,14 @@ private:
     bool  m_leftDown  = false;
     bool  m_midDown   = false;
     bool  m_rightDown = false;
+    bool  m_dragSelecting = false;
+    bool  m_selectMode    = true; // true=select, false=deselect
+    bool  m_autoChainEnabled = true;
     int   m_lastMouseX = 0, m_lastMouseY = 0;
     int   m_rightClickStartX = 0, m_rightClickStartY = 0;  // for context-menu drag detection
+    int   m_selectStartX = 0, m_selectStartY = 0;
+    int   m_selectEndX = 0, m_selectEndY = 0;
+    int   m_hoverEntity = -1;
 
     // Spin inertia (applied via WM_TIMER after a fast left-drag or wheel rotation)
     float       m_spinVelX      = 0.0f;
@@ -128,12 +154,13 @@ private:
     HDC                    m_hDC         = nullptr;
     HGLRC                  m_hGLRC       = nullptr;
     RenderMode             m_renderMode  = RenderMode::Shaded;
+    SelectionFilter        m_selectionFilter = SelectionFilter::All;
     bool                   m_showGrid    = true;   // toggled by F4
     bool                   m_showGnomon  = true;   // toggled by F5
     const ToolpathManager* m_toolpathMgr = nullptr;  // non-owning
     const SolidsManager*   m_solidsMgr   = nullptr;  // non-owning
     const SurfacesManager* m_surfacesMgr = nullptr;  // non-owning
-    const WireframeScene*  m_wfScene     = nullptr;  // non-owning
+    WireframeScene*        m_wfScene     = nullptr;  // non-owning
 
     CoordCallback       m_coordCb;        // cursor world-space position callback
     ContextMenuCallback m_contextMenuCb;  // right-click context menu callback
