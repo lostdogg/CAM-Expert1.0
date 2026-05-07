@@ -556,6 +556,12 @@ void MainWindow::onCreate() {
     if (m_viewport) {
         m_viewport->setCoordCallback([this](double x, double y, double z) {
             updateCoordinateDisplay(x, y, z);
+            if (m_wfScene) {
+                SnapResult snap = AutoCursor::findSnap(*m_wfScene, Geom::Vec3{x, y, z});
+                updateSnapDisplay(snap);
+            } else {
+                updateSnapDisplay(SnapResult{});
+            }
         });
 
         // Wire right-click context menu callback
@@ -1087,6 +1093,10 @@ void MainWindow::onCommand(int id) {
         if (m_viewport) m_viewport->redraw();
         SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
                     reinterpret_cast<LPARAM>(L"Colors cleared."));
+        break;
+    case IDM_CTX_CHANGE_COLOR:
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
+                    reinterpret_cast<LPARAM>(L"Change Color: selected-entity coloring is not yet implemented."));
         break;
 
     default:
@@ -4121,6 +4131,26 @@ void MainWindow::updateCoordinateDisplay(double x, double y, double z) {
 }
 
 // --------------------------------------------------------------------------
+void MainWindow::updateSnapDisplay(const SnapResult& snap) {
+    if (!m_hStatusBar) return;
+
+    const wchar_t* label = L"–";
+    switch (snap.type) {
+    case SnapType::Endpoint:     label = L"Endpoint"; break;
+    case SnapType::Midpoint:     label = L"Midpoint"; break;
+    case SnapType::ArcCenter:    label = L"Center";   break;
+    case SnapType::Quadrant:     label = L"Quadrant"; break;
+    case SnapType::Intersection: label = L"Intersect"; break;
+    default: break;
+    }
+
+    wchar_t txt[40] = {};
+    std::swprintf(txt, 40, L"Snap: %s", label);
+    SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_SNAP,
+                reinterpret_cast<LPARAM>(txt));
+}
+
+// --------------------------------------------------------------------------
 void MainWindow::unitToggle() {
     m_useMetric = !m_useMetric;
     updateUnitPane();
@@ -4132,8 +4162,19 @@ void MainWindow::unitToggle() {
 // --------------------------------------------------------------------------
 void MainWindow::showViewportContextMenu(int screenX, int screenY) {
     HMENU hMenu = CreatePopupMenu();
-    AppendMenuW(hMenu, MF_STRING, IDM_CTX_FIT,   L"Fit to Screen\tF3");
-    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+    const bool hasSelection = m_wfScene && !m_wfScene->selectedIndices().empty();
+
+    if (hasSelection) {
+        AppendMenuW(hMenu, MF_STRING, IDM_EDIT_ANALYZE, L"Analyze\tEnd");
+        AppendMenuW(hMenu, MF_STRING, IDM_EDIT_DELETE,  L"Delete\tDel");
+        AppendMenuW(hMenu, MF_STRING, IDM_CTX_CHANGE_COLOR, L"Change Color…");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+    } else {
+        AppendMenuW(hMenu, MF_STRING, IDM_CTX_FIT, L"Fit to Screen\tF3");
+        AppendMenuW(hMenu, MF_STRING, IDM_CTX_CLEAR_COLORS, L"Clear Colors");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+    }
+
     AppendMenuW(hMenu, MF_STRING, IDM_CTX_ISO,   L"Isometric View");
     AppendMenuW(hMenu, MF_STRING, IDM_CTX_FRONT, L"Front View");
     AppendMenuW(hMenu, MF_STRING, IDM_CTX_TOP,   L"Top View");
@@ -4142,8 +4183,6 @@ void MainWindow::showViewportContextMenu(int screenX, int screenY) {
     AppendMenuW(hMenu, MF_STRING, IDM_VIEW_WIREFRAME, L"Wireframe");
     AppendMenuW(hMenu, MF_STRING, IDM_VIEW_SHADED,    L"Shaded");
     AppendMenuW(hMenu, MF_STRING, IDM_VIEW_TRANSLU,   L"Translucent");
-    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hMenu, MF_STRING, IDM_CTX_CLEAR_COLORS, L"Clear Colors");
     AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hMenu, MF_STRING, IDM_UNIT_TOGGLE,
                 m_useMetric ? L"Switch to Imperial (in)" : L"Switch to Metric (mm)");
