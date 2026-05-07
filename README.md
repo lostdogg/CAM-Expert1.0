@@ -75,6 +75,33 @@ The **Wireframe** tab is the primary toolkit for sketching the lines, arcs, and 
 - **Manual Spline** – create a smooth curve by defining a series of spline points or control points.
 - **Letters** – generate text as wireframe geometry for engraving by entering the text, font, and height, then placing it on the part.
 
+### Solids quick reference
+
+The **Solids** tab is where 2D wireframe sketches become 3D volume representing the material to machine.
+
+#### 1. Primary creation tools
+- **Extrude** – push a closed wireframe chain into the third dimension to create a solid body or cut material.
+- **Revolve** – spin a wireframe profile around a centre axis to build cylindrical or conical bodies.
+- **Sweep** – move a profile cross-section along a selected path curve.
+- **Loft** – blend two or more wireframe chains to skin a smooth transition between them.
+
+#### 2. Refining the solid
+- **Constant Fillet** – round sharp edges by entering a radius and selecting target edges or faces.
+- **Chamfer** – create a flat angled edge break from entered distances or angle settings.
+- **Shell** – hollow a body by selecting an opening face and setting wall thickness.
+
+#### 3. Boolean operations
+- **Boolean Add** – merge target and tool solids into one body.
+- **Boolean Remove (Subtract)** – carve material from a target using one or more tool solids.
+- **Boolean Common (Intersect)** – keep only the overlapping volume between selected solids.
+
+#### 4. Advanced modification
+- **Thicken** – convert a thin surface into a solid by applying thickness.
+- **Trim to Plane** – cut a solid using a plane or surface and keep the required side.
+- **Remove Faces** – remove selected feature faces (for example holes or fillets) and heal the surrounding area during model-prep cleanup.
+
+Use the **Solids Manager** side panel as a feature/history tree. You can revisit operations such as extrusion height, fillet radius, shell thickness, and boolean intent without redrawing the model.
+
 ### CAD / File Handling
 - **B-Rep (Boundary Representation)** solid modelling with topology awareness
 - **NURBS Surfaces** – full tensor-product NURBS with Cox-de Boor evaluation, normals, and tessellation

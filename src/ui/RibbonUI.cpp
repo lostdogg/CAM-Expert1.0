@@ -210,11 +210,11 @@ void RibbonUI::buildSolidsTab() {
 
     // Create group – history-based operations from wireframe chains
     RibbonGroup create{"Create", {
-        {IDM_SOLID_EXTRUDE,  "Extrude",   "Push a 2D profile along a linear path (Add Boss, Cut Body, or New)"},
-        {IDM_SOLID_REVOLVE,  "Revolve",   "Rotate a 2D profile around an axis to create cylindrical shapes"},
-        {IDM_SOLID_SWEEP,    "Sweep",     "Move a profile along a path curve to create complex tubular shapes"},
-        {IDM_SOLID_LOFT,     "Loft",      "Blend multiple cross-section ribs into a smooth organic solid"},
-        {IDM_SOLID_THICKEN,  "Thicken",   "Add thickness to an existing surface to produce a solid body"}
+        {IDM_SOLID_EXTRUDE,  "Extrude",   "Push a closed wireframe chain into 3D by setting distance, direction, and body mode (Create Body or Cut Body)"},
+        {IDM_SOLID_REVOLVE,  "Revolve",   "Spin a wireframe profile around a selected axis and angle (for example 360° for a full body)"},
+        {IDM_SOLID_SWEEP,    "Sweep",     "Move a cross-section profile along a selected wireframe path"},
+        {IDM_SOLID_LOFT,     "Loft",      "Blend two or more wireframe chains by skinning the volume between them"},
+        {IDM_SOLID_THICKEN,  "Thicken",   "Turn a thin surface into a solid by applying thickness in a chosen direction"}
     }};
 
     // Primitives group – drop standard shapes without needing wireframe
@@ -228,18 +228,18 @@ void RibbonUI::buildSolidsTab() {
 
     // Modify group – refine features on an existing solid
     RibbonGroup modify{"Modify", {
-        {IDM_SOLID_FILLET,   "Fillet",    "Round off sharp edges with a constant or variable radius"},
-        {IDM_SOLID_CHAMFER,  "Chamfer",   "Apply a flat angled break to edges (symmetrical or asymmetrical)"},
-        {IDM_SOLID_SHELL,    "Shell",     "Hollow out a solid to a specified wall thickness"},
+        {IDM_SOLID_FILLET,   "Fillet",    "Round selected solid edges or faces with a constant fillet radius"},
+        {IDM_SOLID_CHAMFER,  "Chamfer",   "Apply a flat angled cut to selected edges using distance or distance-angle values"},
+        {IDM_SOLID_SHELL,    "Shell",     "Hollow a solid by selecting an opening face and setting wall thickness"},
         {IDM_SOLID_DRAFT,    "Draft",     "Taper vertical faces for moulding or casting pull"},
-        {IDM_SOLID_TRIM,     "Trim",      "Cut a solid body using a plane, surface, or another solid"}
+        {IDM_SOLID_TRIM,     "Trim",      "Trim a solid to a plane or surface and keep the side you need"}
     }};
 
     // Boolean group – combine or subtract solid bodies
     RibbonGroup boolean_{"Boolean", {
-        {IDM_SOLID_UNION,    "Add",       "Merge two or more solid bodies into a single entity"},
-        {IDM_SOLID_SUBTRACT, "Remove",    "Use one solid to cut a shape out of another"},
-        {IDM_SOLID_INTERSECT,"Common",    "Keep only the volume where two solids overlap"}
+        {IDM_SOLID_UNION,    "Add",       "Merge target and tool solids into a single body (Boolean Add)"},
+        {IDM_SOLID_SUBTRACT, "Remove",    "Subtract tool solids from the target body (Boolean Remove)"},
+        {IDM_SOLID_INTERSECT,"Common",    "Keep only the overlapping volume shared by selected solids (Boolean Common)"}
     }};
 
     // Advanced / Specialized group
