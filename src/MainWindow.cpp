@@ -2950,8 +2950,8 @@ void MainWindow::createWireframe(int commandId) {
         updateWfStatusBar();
     };
 
-    static constexpr double kTwoPi    = 6.28318530717959;
-    static constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+    static constexpr double kTwoPi    = 2.0 * kPi;
+    static constexpr double kDegToRad = kPi / 180.0;
 
     switch (commandId) {
 
