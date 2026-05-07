@@ -132,6 +132,7 @@ public:
     void selectByType(WfEntityType type);   // add all entities of given type to selection
     bool isSelected(int index) const;
     std::vector<int> selectedIndices() const;  // sorted ascending
+    std::vector<int> autoChainFrom(int seedIndex, double tolerance = 1e-4) const;
 
     // --- Undo / Redo stack ---
     // Call pushUndoState() before any destructive edit (add/delete/paste).

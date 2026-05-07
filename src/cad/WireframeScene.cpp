@@ -1,6 +1,7 @@
 #include "WireframeScene.h"
 #include <algorithm>
 #include <cwchar>
+#include <unordered_map>
 
 // File-scope constants
 static constexpr double kTwoPi   = 6.28318530717959;
@@ -101,6 +102,110 @@ bool WireframeScene::isSelected(int index) const {
 
 std::vector<int> WireframeScene::selectedIndices() const {
     return std::vector<int>(m_selected.begin(), m_selected.end());
+}
+
+namespace {
+bool isChainEntityType(WfEntityType t) {
+    return t == WfEntityType::Line || t == WfEntityType::Arc || t == WfEntityType::Circle;
+}
+
+bool chainEndpoints(const WfEntity& e, Geom::Vec3& a, Geom::Vec3& b) {
+    if (!isChainEntityType(e.type)) return false;
+    if (e.type == WfEntityType::Line) {
+        a = e.p0;
+        b = e.p1;
+        return true;
+    }
+    if (e.type == WfEntityType::Circle) {
+        // Closed entity – starts/ends at itself.
+        a = e.p0;
+        b = e.p0;
+        return true;
+    }
+    // Arc start/end from center + radius + angles.
+    a = { e.p0.x + e.radius * std::cos(e.startAngle),
+          e.p0.y + e.radius * std::sin(e.startAngle),
+          e.p0.z };
+    b = { e.p0.x + e.radius * std::cos(e.endAngle),
+          e.p0.y + e.radius * std::sin(e.endAngle),
+          e.p0.z };
+    return true;
+}
+
+bool pointsNear(const Geom::Vec3& p, const Geom::Vec3& q, double tol) {
+    const double dx = p.x - q.x;
+    const double dy = p.y - q.y;
+    const double dz = p.z - q.z;
+    return (dx * dx + dy * dy + dz * dz) <= tol * tol;
+}
+} // namespace
+
+std::vector<int> WireframeScene::autoChainFrom(int seedIndex, double tolerance) const {
+    std::vector<int> out;
+    if (seedIndex < 0 || seedIndex >= static_cast<int>(m_entities.size()))
+        return out;
+    if (!isChainEntityType(m_entities[seedIndex].type))
+        return out;
+
+    // Circles are already closed loops.
+    if (m_entities[seedIndex].type == WfEntityType::Circle) {
+        out.push_back(seedIndex);
+        return out;
+    }
+
+    struct Endpoints { Geom::Vec3 a{}, b{}; };
+    std::unordered_map<int, Endpoints> eps;
+    std::vector<int> candidates;
+    candidates.reserve(m_entities.size());
+
+    for (int i = 0; i < static_cast<int>(m_entities.size()); ++i) {
+        Geom::Vec3 a{}, b{};
+        if (!chainEndpoints(m_entities[i], a, b)) continue;
+        eps.emplace(i, Endpoints{a, b});
+        candidates.push_back(i);
+    }
+
+    // Build adjacency by endpoint touching.
+    std::unordered_map<int, std::vector<int>> nbrs;
+    for (int i = 0; i < static_cast<int>(candidates.size()); ++i) {
+        int ia = candidates[i];
+        const auto& ea = eps.at(ia);
+        for (int j = i + 1; j < static_cast<int>(candidates.size()); ++j) {
+            int ib = candidates[j];
+            const auto& eb = eps.at(ib);
+            if (pointsNear(ea.a, eb.a, tolerance) || pointsNear(ea.a, eb.b, tolerance) ||
+                pointsNear(ea.b, eb.a, tolerance) || pointsNear(ea.b, eb.b, tolerance)) {
+                nbrs[ia].push_back(ib);
+                nbrs[ib].push_back(ia);
+            }
+        }
+    }
+
+    std::set<int> visited;
+    std::deque<int> q;
+    q.push_back(seedIndex);
+    visited.insert(seedIndex);
+
+    while (!q.empty()) {
+        int cur = q.front();
+        q.pop_front();
+        out.push_back(cur);
+
+        // Branching node: include it, but do not grow further through it.
+        const int degree = static_cast<int>(nbrs[cur].size());
+        if (degree > 2) continue;
+
+        for (int n : nbrs[cur]) {
+            if (visited.count(n)) continue;
+            // Stop growth before entering branchy neighbors.
+            if (static_cast<int>(nbrs[n].size()) > 2) continue;
+            visited.insert(n);
+            q.push_back(n);
+        }
+    }
+
+    std::sort(out.begin(), out.end());
+    return out;
 }
 
 // --- Undo / Redo ---
