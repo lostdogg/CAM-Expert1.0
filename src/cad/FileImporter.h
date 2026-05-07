@@ -8,63 +8,68 @@
 #include <memory>
 #include <variant>
 #include <vector>
+#include <unordered_map>
 
-// --------------------------------------------------------------------------
-// FileImporter
-//
-// Handles a wide range of CAD file formats:
-//   Neutral:   STEP (.step/.stp), IGES (.iges/.igs), STL (.stl), OBJ (.obj)
-//   Native:    SolidWorks (.sldprt/.sldasm), AutoCAD (.dwg/.dxf),
-//              Inventor (.ipt/.iam), Siemens NX (.prt)
-//
-// Returns either a B-Rep solid (for STEP/IGES/native) or a MeshData
-// (for STL/OBJ). Internally, it auto-detects the format from the file
-// extension (and file header magic bytes as a fallback).
-// --------------------------------------------------------------------------
-
-// Represent either a B-Rep solid or a triangle mesh
-using ImportResult = std::variant<BRep::Solid, MeshData>;
+// Represent either an import failure, a B-Rep solid, or a triangle mesh.
+using ImportResult = std::variant<std::monostate, BRep::Solid, MeshData>;
 
 enum class FileFormat {
     Unknown,
-    STEP,       // .step / .stp  – neutral B-Rep (ISO 10303)
-    IGES,       // .iges / .igs  – neutral B-Rep (ANS/ASME)
-    STL,        // .stl          – triangle mesh
-    OBJ,        // .obj          – Wavefront triangle mesh
+    STEP,       // .step / .stp
+    IGES,       // .iges / .igs
+    Parasolid,  // .x_t / .x_b
+    STL,        // .stl
+    OBJ,        // .obj
+    ThreeMF,    // .3mf
+    AMF,        // .amf
     SolidWorks, // .sldprt / .sldasm
     AutoCAD,    // .dwg / .dxf
+    Rhino3DM,   // .3dm
     Inventor,   // .ipt / .iam
-    SiemensNX   // .prt
+    CATIA       // .CATPart
+};
+
+enum class GeometryPriority {
+    Mesh = 10,
+    Precise = 100
+};
+
+class IGeometryImporter {
+public:
+    virtual ~IGeometryImporter() = default;
+    virtual const char* name() const = 0;
+    virtual GeometryPriority priority() const = 0;
+    virtual std::vector<std::string> supportedExtensions() const = 0;
+    virtual bool importFile(const std::string& filePath,
+                            ImportResult& outResult,
+                            std::string& outMessage) const = 0;
 };
 
 class FileImporter {
 public:
-    FileImporter() = default;
+    FileImporter();
 
-    // Primary entry point – detects format and imports
+    // Primary entry point – resolves importer by extension and imports.
     ImportResult import(const std::string& filePath);
 
-    // Last error message (empty on success)
+    // Last status/error message (empty on success with no warnings)
     const std::string& lastError() const { return m_lastError; }
 
-    // Format detection utility
+    // Format detection utility by file extension.
     static FileFormat detectFormat(const std::string& filePath);
     static std::string formatName(FileFormat fmt);
 
-private:
-    ImportResult importSTEP(const std::string& path);
-    ImportResult importIGES(const std::string& path);
-    ImportResult importSTL (const std::string& path);
-    ImportResult importOBJ (const std::string& path);
-    ImportResult importSolidWorks(const std::string& path);
-    ImportResult importAutoCAD   (const std::string& path);
-    ImportResult importInventor  (const std::string& path);
-    ImportResult importSiemensNX (const std::string& path);
+    // Extensibility points: register custom importers without modifying core.
+    void registerImporter(std::unique_ptr<IGeometryImporter> importer);
+    std::vector<std::string> supportedExtensions() const;
 
-    // ASCII / binary detection for STL
-    static bool isAsciiSTL(const std::string& path);
+private:
+    void registerDefaultImporters();
+    static std::string normalizeExtension(const std::string& extOrPath);
 
     std::string m_lastError;
+    std::vector<std::unique_ptr<IGeometryImporter>> m_importers;
+    std::unordered_map<std::string, std::vector<const IGeometryImporter*>> m_extensionMap;
 };
 
 #endif // FILE_IMPORTER_H

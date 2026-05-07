@@ -1237,13 +1237,19 @@ void MainWindow::fileImport() {
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner   = m_hwnd;
     ofn.lpstrFilter =
-        L"All Supported (*.step;*.stp;*.iges;*.igs;*.stl;*.obj;*.sldprt;*.sldasm)\0"
-        L"*.step;*.stp;*.iges;*.igs;*.stl;*.obj;*.sldprt;*.sldasm\0"
+        L"All Supported (*.step;*.stp;*.iges;*.igs;*.x_t;*.x_b;*.stl;*.obj;*.3mf;*.amf;*.dxf;*.dwg;*.sldprt;*.sldasm;*.3dm;*.ipt;*.iam;*.CATPart)\0"
+        L"*.step;*.stp;*.iges;*.igs;*.x_t;*.x_b;*.stl;*.obj;*.3mf;*.amf;*.dxf;*.dwg;*.sldprt;*.sldasm;*.3dm;*.ipt;*.iam;*.CATPart\0"
         L"STEP Files (*.step;*.stp)\0*.step;*.stp\0"
         L"IGES Files (*.iges;*.igs)\0*.iges;*.igs\0"
+        L"Parasolid (*.x_t;*.x_b)\0*.x_t;*.x_b\0"
         L"STL Files (*.stl)\0*.stl\0"
         L"OBJ Files (*.obj)\0*.obj\0"
+        L"3MF / AMF (*.3mf;*.amf)\0*.3mf;*.amf\0"
+        L"AutoCAD (*.dxf;*.dwg)\0*.dxf;*.dwg\0"
         L"SolidWorks (*.sldprt;*.sldasm)\0*.sldprt;*.sldasm\0"
+        L"Rhino (*.3dm)\0*.3dm\0"
+        L"Inventor (*.ipt;*.iam)\0*.ipt;*.iam\0"
+        L"CATIA (*.CATPart)\0*.CATPart\0"
         L"All Files (*.*)\0*.*\0";
     ofn.lpstrFile   = szFile;
     ofn.nMaxFile    = MAX_PATH;
@@ -1366,7 +1372,13 @@ void MainWindow::postProcess() {
     ofn.lStructSize    = sizeof(ofn);
     ofn.hwndOwner      = m_hwnd;
     ofn.lpstrFilter    =
-        L"NC Files (*.nc;*.tap;*.cnc;*.mpf)\0*.nc;*.tap;*.cnc;*.mpf\0"
+        L"CNC Programs (*.nc;*.ncc;*.tap;*.gcode;*.mpf;*.spf;*.din;*.sbp)\0*.nc;*.ncc;*.tap;*.gcode;*.mpf;*.spf;*.din;*.sbp\0"
+        L"Generic NC (*.nc;*.ncc)\0*.nc;*.ncc\0"
+        L"TAP (*.tap)\0*.tap\0"
+        L"GCODE (*.gcode)\0*.gcode\0"
+        L"Siemens (*.mpf;*.spf)\0*.mpf;*.spf\0"
+        L"Heidenhain DIN (*.din)\0*.din\0"
+        L"ShopBot (*.sbp)\0*.sbp\0"
         L"Text Files (*.txt)\0*.txt\0"
         L"All Files (*.*)\0*.*\0";
     ofn.lpstrFile      = szFile;

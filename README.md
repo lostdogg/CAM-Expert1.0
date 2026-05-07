@@ -110,9 +110,11 @@ Use the **Solids Manager** side panel as a feature/history tree. You can revisit
 - **B-Rep (Boundary Representation)** solid modelling with topology awareness
 - **NURBS Surfaces** – full tensor-product NURBS with Cox-de Boor evaluation, normals, and tessellation
 - **Mesh Data** – STL/OBJ triangle meshes with silhouette extraction and gouge detection
+- **Modular File Importer Architecture** – pluggable importer interface (`IGeometryImporter`) so new formats can be added without rewriting the core graphics engine
 - **File Import**:
-  - Neutral formats: STEP, IGES, STL (ASCII & binary), OBJ
-  - Native formats: SolidWorks (`.sldprt`/`.sldasm`), AutoCAD (`.dwg`/`.dxf`), Inventor, Siemens NX
+  - Precise geometry first: STEP (`.stp`/`.step`), IGES (`.igs`/`.iges`), Parasolid (`.x_t`/`.x_b`)
+  - Mesh formats: STL (ASCII & binary), OBJ
+  - Additional connectors/stubs: 3MF/AMF, SolidWorks (`.sldprt`/`.sldasm`), AutoCAD (`.dwg`/`.dxf`), Rhino (`.3dm`), Inventor (`.ipt`/`.iam`), CATIA (`.CATPart`)
 - **Model Prep Engine** – fillet removal, surface healing, boundary extraction, feature classification
 - **Feature Recognition** – automatic identification of holes, pockets, bosses, and slots
 
@@ -141,6 +143,7 @@ Use the **Solids Manager** side panel as a feature/history tree. You can revisit
   - Metric / imperial, absolute / incremental
   - Tool change, spindle, coolant blocks
   - 5-axis A/B axis output
+- **Machine output extensions**: `.nc`, `.ncc`, `.tap`, `.gcode`, `.mpf`, `.spf`, `.din`, `.sbp`
 
 ---
 
