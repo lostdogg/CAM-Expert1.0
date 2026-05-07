@@ -47,6 +47,14 @@ void WireframeScene::addEntity(WfEntity e) {
         m_onEntityChanged(static_cast<int>(m_entities.size()) - 1);
 }
 
+bool WireframeScene::setEntity(int index, WfEntity e) {
+    if (index < 0 || index >= static_cast<int>(m_entities.size())) return false;
+    m_entities[static_cast<std::size_t>(index)] = std::move(e);
+    if (m_onEntityChanged)
+        m_onEntityChanged(index);
+    return true;
+}
+
 void WireframeScene::removeEntity(int index) {
     if (index < 0 || index >= static_cast<int>(m_entities.size())) return;
     m_entities.erase(m_entities.begin() + index);

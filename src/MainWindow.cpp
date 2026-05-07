@@ -3599,14 +3599,19 @@ void MainWindow::createWireframe(int commandId) {
         if (mode >= 0.5) {
             if (!promptSingle(L"Spiral / Helix - Total Height",
                               L"Total height (mm):", totalHeight, totalHeight)) return;
-            pitch = (std::abs(revs) > kEps) ? (totalHeight / revs) : 0.0;
         } else {
             if (!promptSingle(L"Spiral / Helix - Pitch",
                               L"Pitch (mm/rev):", pitch, pitch)) return;
             totalHeight = pitch * revs;
         }
-        if (revs <= 0 || rStart <= 0 || rEnd <= 0 || std::abs(totalHeight) <= kEps || pitch <= 0.0) {
+        if (revs <= 0 || rStart <= 0 || rEnd <= 0) {
             MessageBoxW(m_hwnd, L"Revolutions, radii, and height/pitch must all be positive.",
+                        L"Spiral/Helix", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        if (mode >= 0.5) pitch = totalHeight / revs;
+        if (std::abs(totalHeight) <= kEps || pitch <= 0.0) {
+            MessageBoxW(m_hwnd, L"Height and resulting pitch must be positive.",
                         L"Spiral/Helix", MB_OK | MB_ICONWARNING);
             return;
         }
@@ -3858,8 +3863,9 @@ void MainWindow::createWireframe(int commandId) {
                 if (da * db > 0.0) continue;
                 const double t = da / (da - db);
                 const Geom::Vec3 p = a + (b - a) * t;
-                // Emit a very short marker segment so intersection remains visible as wireframe.
-                const Geom::Vec3 q = p + Geom::Vec3{0.05, 0.05, 0.05};
+                // Emit a very short marker segment so point-intersections remain visible.
+                static constexpr double kIntersectionMarkerLen = 0.05;
+                const Geom::Vec3 q = p + Geom::Vec3{kIntersectionMarkerLen, kIntersectionMarkerLen, kIntersectionMarkerLen};
                 bumpLevel();
                 addLine3D(p, q);
                 ++segs;
@@ -4006,12 +4012,9 @@ void MainWindow::createWireframe(int commandId) {
         }
 
         if (!makeCopy) {
-            auto& ents = const_cast<std::vector<WfEntity>&>(m_wfScene->entities());
             m_wfScene->pushUndoState();
             for (auto& item : projected) {
-                int idx = item.first;
-                if (idx >= 0 && idx < static_cast<int>(ents.size()))
-                    ents[static_cast<std::size_t>(idx)] = item.second;
+                m_wfScene->setEntity(item.first, std::move(item.second));
             }
             if (m_viewport) m_viewport->redraw();
             SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
