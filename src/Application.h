@@ -25,8 +25,8 @@ public:
     MainWindow* mainWindow() const { return m_mainWindow.get(); }
 
     // Application-wide strings
-    static constexpr const wchar_t* APP_NAME    = L"CAM-Expert 1.0";
-    static constexpr const wchar_t* APP_VERSION = L"1.1.0";
+    static constexpr const wchar_t* APP_NAME    = L"CAM-Expert 1.2";
+    static constexpr const wchar_t* APP_VERSION = L"1.2.0";
 
 private:
     Application() = default;
