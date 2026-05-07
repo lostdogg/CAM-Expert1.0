@@ -6,6 +6,7 @@
 #include "../cad/WireframeScene.h"
 #include <gl/gl.h>
 #include <gl/glu.h>
+#include <windowsx.h>
 #include <algorithm>
 #include <cmath>
 #include <numbers>
