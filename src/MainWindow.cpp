@@ -18,6 +18,10 @@
 #include "cam/Strategies3D.h"
 #include "cam/MultiAxis.h"
 #include "cam/ProbingCycles.h"
+#include "cam/CloudToolLibrary.h"
+#include "cam/SqlToolDatabase.h"
+#include "cam/MaterialLibrary.h"
+#include "cad/ConstraintSolver.h"
 #include "cad/FileImporter.h"
 #include "cad/ModelPrep.h"
 #include "cad/FeatureRecognition.h"
@@ -30,6 +34,7 @@
 #include <string>
 #include <sstream>
 #include <fstream>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -57,6 +62,51 @@ struct TriplePromptState {
     wchar_t buf3[64] = {};
     bool    accepted = false;
 };
+
+static std::wstring toWideFromUtf8(const std::string& s) {
+    if (s.empty()) return {};
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    if (wlen <= 1) return {};
+    std::wstring out(static_cast<std::size_t>(wlen - 1), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, out.data(), wlen);
+    return out;
+}
+
+static std::string toUtf8FromWide(const wchar_t* ws) {
+    if (!ws || !*ws) return {};
+    int nbytes = WideCharToMultiByte(CP_UTF8, 0, ws, -1, nullptr, 0, nullptr, nullptr);
+    if (nbytes <= 1) return {};
+    std::string out(static_cast<std::size_t>(nbytes - 1), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, ws, -1, out.data(), nbytes, nullptr, nullptr);
+    return out;
+}
+
+static const wchar_t* constraintTypeName(SketchConstraintType t) {
+    switch (t) {
+    case SketchConstraintType::Coincident:    return L"Coincident";
+    case SketchConstraintType::Horizontal:    return L"Horizontal";
+    case SketchConstraintType::Vertical:      return L"Vertical";
+    case SketchConstraintType::Parallel:      return L"Parallel";
+    case SketchConstraintType::Perpendicular: return L"Perpendicular";
+    case SketchConstraintType::EqualLength:   return L"EqualLength";
+    case SketchConstraintType::Distance:      return L"Distance";
+    case SketchConstraintType::Angle:         return L"Angle";
+    case SketchConstraintType::Radius:        return L"Radius";
+    case SketchConstraintType::FixPoint:      return L"FixPoint";
+    default:                                  return L"Unknown";
+    }
+}
+
+static const wchar_t* solveStatusName(SolveResult::Status s) {
+    switch (s) {
+    case SolveResult::Status::Solved:             return L"Solved";
+    case SolveResult::Status::SolvedWithWarnings: return L"SolvedWithWarnings";
+    case SolveResult::Status::Infeasible:         return L"Infeasible";
+    case SolveResult::Status::InvalidInput:       return L"InvalidInput";
+    case SolveResult::Status::DeferredRebuild:    return L"DeferredRebuild";
+    default:                                      return L"Unknown";
+    }
+}
 
 } // anonymous namespace
 
@@ -479,10 +529,16 @@ void MainWindow::onCreate() {
     m_copilotEngine = std::make_unique<CopilotEngine>();
     m_copilotEngine->setToolpathManager(m_toolpathMgr.get());
     m_copilotEngine->setSurfacesManager(m_surfacesMgr.get());
+    m_copilotEngine->setMaterialLibrary(&m_materialLib);
 
     m_copilotPanel = std::make_unique<CopilotPanel>(m_hwnd, hInst);
     m_copilotPanel->setCopilotEngine(m_copilotEngine.get());
     ShowWindow(m_copilotPanel->hwnd(), SW_HIDE);  // hidden by default
+
+    // Sync startup SQL "single source of truth" cache from current libraries.
+    m_sqlToolDb.clear();
+    m_materialLib.exportToSqlDatabase(m_sqlToolDb);
+    m_cloudToolLib.exportToSqlDatabase(m_sqlToolDb);
 
     // --- Wireframe scene (entity store, Cplane, Z-depth) ---
     m_wfScene = std::make_unique<WireframeScene>();
@@ -582,6 +638,13 @@ void MainWindow::buildMenu() {
     AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_REGEN,    L"Re&generate All");
     AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_SUMMARY,  L"&Machining Summary…");
+    AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hMachine, MF_STRING,    IDM_SETUP_CONSTRAINTS,  L"Setup &Constraints…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_SETUP_POST_PROFILE, L"Setup Post &Profile…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_SETUP_TOOL_DB,      L"Setup Tool/&Material DB…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_SETUP_PERF_MODE,    L"Setup &Performance Mode…");
+    AppendMenuW(hMachine, MF_STRING,    IDM_SETUP_GUIDANCE,     L"Context &Guidance");
+    AppendMenuW(hMachine, MF_STRING,    IDM_SETUP_AUDIT_LOG,    L"Recent &Audit Trail…");
     AppendMenuW(hMachine, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hMachine, MF_STRING,    IDM_TOOLPATH_MGR_TOGGLE,  L"&Toolpath Manager\tT");
     AppendMenuW(hMachine, MF_STRING,    IDM_TOOLPATH_TOGGLE_DISP, L"Toggle Toolpath &Display\tCtrl+Shift+T");
@@ -794,6 +857,12 @@ void MainWindow::onCommand(int id) {
     case IDM_MACHINE_5AXIS:       generate5AxisSwarf();     break;
     case IDM_MACHINE_REGEN:       regenerateAllToolpaths();  break;
     case IDM_MACHINE_SUMMARY:     showMachiningSummary();    break;
+    case IDM_SETUP_CONSTRAINTS:   setupConstraints();        break;
+    case IDM_SETUP_POST_PROFILE:  setupPostProfile();        break;
+    case IDM_SETUP_TOOL_DB:       setupToolDatabase();       break;
+    case IDM_SETUP_PERF_MODE:     setupPerformanceMode();    break;
+    case IDM_SETUP_GUIDANCE:      showWorkflowGuidance();    break;
+    case IDM_SETUP_AUDIT_LOG:     showOperationAuditTrail(); break;
 
     case IDM_VIEW_WIREFRAME:
         if (m_viewport) m_viewport->setRenderMode(RenderMode::Wireframe);
@@ -1085,6 +1154,11 @@ void MainWindow::showAboutDialog() {
         L"  \u2022 Enhanced mouse: Ctrl/Shift+wheel rotation with inertia spin\n"
         L"  \u2022 Horizontal scroll (WM_MOUSEHWHEEL) pans view left/right\n"
         L"  \u2022 F4/F5 grid and gnomon display toggles\n\n"
+        L"New in v1.4:\n"
+        L"  \u2022 Setup workflows for Constraints, Post Profiles, and SQL Tool/Material DB\n"
+        L"  \u2022 Post and simulation preflight checks with remediation messaging\n"
+        L"  \u2022 Operation-level recent audit trail and context guidance\n"
+        L"  \u2022 Performance mode presets (Quality/Balanced/Speed) for heavy 3D generation\n\n"
         L"New in v1.2:\n"
         L"  \u2022 3D Waterline (Z-level) toolpath generation\n"
         L"  \u2022 3D Scallop (constant step-over) with live scallop-height readout\n"
@@ -1105,6 +1179,12 @@ void MainWindow::fileNew() {
         m_wfScene->clear();
         m_wfScene->clearUndoRedo();
     }
+    m_constraintSolver.clearConstraints();
+    m_activePostProfilePath.clear();
+    m_operationAudit.clear();
+    m_sqlToolDb.clear();
+    m_materialLib.exportToSqlDatabase(m_sqlToolDb);
+    m_cloudToolLib.exportToSqlDatabase(m_sqlToolDb);
     m_wfClipboard.clear();
     if (m_viewport)     m_viewport->reset();
     m_currentFile.clear();
@@ -1235,13 +1315,38 @@ void MainWindow::fileImport() {
 
 // --------------------------------------------------------------------------
 void MainWindow::postProcess() {
+    std::wstring preflightReason;
+    if (!preflightForPosting(preflightReason)) {
+        MessageBoxW(m_hwnd, preflightReason.c_str(),
+                    L"Post Preflight Check", MB_OK | MB_ICONWARNING);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+                    reinterpret_cast<LPARAM>(L"Post cancelled by preflight check."));
+        appendAudit(L"Post preflight failed");
+        return;
+    }
+
     PostProcessor pp;
+    if (!m_activePostProfilePath.empty()) {
+        std::string err;
+        if (!pp.loadScriptProfile(m_activePostProfilePath, &err)) {
+            std::wstring werr = toWideFromUtf8(err);
+            MessageBoxW(m_hwnd, werr.c_str(), L"Post Profile Error", MB_OK | MB_ICONWARNING);
+            appendAudit(L"Post aborted: profile load failure");
+            return;
+        }
+    }
+
     const CoordPlane* wcsPlane = m_planesMgr ? m_planesMgr->wcsPlane() : nullptr;
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(L"Posting in progress..."));
+    SetCursor(LoadCursor(nullptr, IDC_WAIT));
     auto gcode = pp.generate(m_toolpathMgr.get(), wcsPlane);
+    SetCursor(LoadCursor(nullptr, IDC_ARROW));
 
     if (gcode.empty()) {
         SendMessage(m_hStatusBar, SB_SETTEXT, 0,
             reinterpret_cast<LPARAM>(L"Post-Processor: no toolpaths to process."));
+        appendAudit(L"Post generated no output");
         return;
     }
 
@@ -1251,6 +1356,7 @@ void MainWindow::postProcess() {
         std::wstring werr(static_cast<std::size_t>(wlen > 0 ? wlen - 1 : 0), L'\0');
         MultiByteToWideChar(CP_UTF8, 0, errStr.c_str(), -1, werr.data(), wlen);
         MessageBoxW(m_hwnd, werr.c_str(), L"Post-Processor Error", MB_OK | MB_ICONWARNING);
+        appendAudit(L"Post failed with post-processor error");
         return;
     }
 
@@ -1279,13 +1385,16 @@ void MainWindow::postProcess() {
             std::wstring msg = std::wstring(L"NC file saved: ") + szFile;
             SendMessage(m_hStatusBar, SB_SETTEXT, 0,
                 reinterpret_cast<LPARAM>(msg.c_str()));
+            appendAudit(L"NC file posted successfully");
         } else {
             MessageBoxW(m_hwnd, L"Failed to write the NC file.",
                         L"Post-Processor", MB_OK | MB_ICONERROR);
+            appendAudit(L"Post failed while writing NC file");
         }
     } else {
         SendMessage(m_hStatusBar, SB_SETTEXT, 0,
             reinterpret_cast<LPARAM>(L"Post-processing complete."));
+        appendAudit(L"Post completed without file save");
     }
 }
 
@@ -1343,8 +1452,21 @@ void MainWindow::runBackplot() {
 
 // --------------------------------------------------------------------------
 void MainWindow::runMachineSim() {
+    std::wstring preflightReason;
+    if (!preflightForSimulation(preflightReason)) {
+        MessageBoxW(m_hwnd, preflightReason.c_str(),
+                    L"Simulation Preflight Check", MB_OK | MB_ICONWARNING);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+                    reinterpret_cast<LPARAM>(L"Machine simulation cancelled by preflight check."));
+        appendAudit(L"Machine simulation preflight failed");
+        return;
+    }
     MachineSimulation sim;
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(L"Machine simulation in progress..."));
+    SetCursor(LoadCursor(nullptr, IDC_WAIT));
     CollisionResult result = sim.run(m_toolpathMgr.get());
+    SetCursor(LoadCursor(nullptr, IDC_ARROW));
     std::wstring msg = L"Machine Sim: ";
     if (result.hasCollision) {
         msg += L"COLLISION at move " + std::to_wstring(result.collisionMoveIdx)
@@ -1356,6 +1478,9 @@ void MainWindow::runMachineSim() {
     }
     SendMessage(m_hStatusBar, SB_SETTEXT, 0,
         reinterpret_cast<LPARAM>(msg.c_str()));
+    appendAudit(result.hasCollision ? L"Machine simulation detected collision"
+               : (result.hasOverTravel ? L"Machine simulation detected over-travel"
+                                      : L"Machine simulation passed"));
 }
 
 // --------------------------------------------------------------------------
@@ -1671,6 +1796,12 @@ void MainWindow::showHelpTopics() {
         L"  P         Point creation\n"
         L"  Ctrl+Shift+T  Toggle toolpath display\n"
         L"  Ctrl+Shift+C  Copy toolpath parameters\n\n"
+        L"Setup Workflows (Machine → Setup)\n"
+        L"  Constraints    Create/list/delete/solve sketch constraints\n"
+        L"  Post Profile   Load/validate/clear script profiles\n"
+        L"  Tool DB        SQL tool/material/cutting-data workflow\n"
+        L"  Performance    Quality/Balanced/Speed and OpenMP visibility\n"
+        L"  Audit          Recent operation-level changes\n\n"
         L"Mouse Controls\n"
         L"  Left drag            Orbit (dynamic rotation)\n"
         L"  Middle / Right drag  Pan\n"
@@ -4381,7 +4512,23 @@ void MainWindow::regenerateAllToolpaths() {
         return;
     }
 
+    int proceed = MessageBoxW(
+        m_hwnd,
+        L"Regenerate all toolpaths now?\n\nThis updates all dirty operations in the current session.",
+        L"Regenerate Toolpaths",
+        MB_OKCANCEL | MB_ICONQUESTION);
+    if (proceed != IDOK) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Regenerate cancelled."));
+        appendAudit(L"Regenerate cancelled by user");
+        return;
+    }
+
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+        reinterpret_cast<LPARAM>(L"Regenerating toolpaths..."));
+    SetCursor(LoadCursor(nullptr, IDC_WAIT));
     m_toolpathMgr->regenerateAll();
+    SetCursor(LoadCursor(nullptr, IDC_ARROW));
 
     if (m_viewport) m_viewport->redraw();
 
@@ -4389,6 +4536,7 @@ void MainWindow::regenerateAllToolpaths() {
     std::swprintf(statusMsg, 128,
         L"Regenerated %d toolpath(s).", m_toolpathMgr->count());
     SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+    appendAudit(L"Regenerated " + std::to_wstring(m_toolpathMgr->count()) + L" toolpath(s)");
 }
 
 // --------------------------------------------------------------------------
@@ -4447,6 +4595,483 @@ void MainWindow::showMachiningSummary() {
         L"Summary: %d op(s), %.1f mm total, %.2f min est.",
         opCount, totalLen, totalTime);
     SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::appendAudit(const std::wstring& message) {
+    SYSTEMTIME st{};
+    GetLocalTime(&st);
+    wchar_t stamp[48] = {};
+    std::swprintf(stamp, 48, L"[%02d:%02d:%02d] ", st.wHour, st.wMinute, st.wSecond);
+    m_operationAudit.emplace_back(std::wstring(stamp) + message);
+    while (m_operationAudit.size() > 120)
+        m_operationAudit.erase(m_operationAudit.begin());
+}
+
+// --------------------------------------------------------------------------
+bool MainWindow::preflightForPosting(std::wstring& reason) const {
+    if (!m_toolpathMgr || m_toolpathMgr->count() <= 0) {
+        reason = L"No toolpaths exist. Generate or import toolpaths before posting.";
+        return false;
+    }
+    int dirtyCount = 0;
+    for (int i = 0; i < m_toolpathMgr->count(); ++i)
+        if (m_toolpathMgr->at(i).isDirty()) ++dirtyCount;
+    if (dirtyCount > 0) {
+        reason = L"One or more toolpaths are marked dirty. Run Machine → Regen before posting.";
+        return false;
+    }
+    if (!m_activePostProfilePath.empty()) {
+        std::ifstream chk(m_activePostProfilePath);
+        if (!chk.good()) {
+            reason = L"Configured post profile cannot be opened. Re-select it in Machine → Setup Post Profile.";
+            return false;
+        }
+    }
+    return true;
+}
+
+// --------------------------------------------------------------------------
+bool MainWindow::preflightForSimulation(std::wstring& reason) const {
+    if (!m_toolpathMgr || m_toolpathMgr->count() <= 0) {
+        reason = L"No toolpaths exist. Generate toolpaths before simulation.";
+        return false;
+    }
+    return true;
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::showOperationAuditTrail() {
+    if (m_operationAudit.empty()) {
+        MessageBoxW(m_hwnd, L"No operation audit entries yet.",
+                    L"Recent Audit Trail", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    std::wstring msg = L"Recent changes (latest first)\n\n";
+    int shown = 0;
+    for (int i = static_cast<int>(m_operationAudit.size()) - 1; i >= 0 && shown < 24; --i, ++shown) {
+        msg += L"• " + m_operationAudit[static_cast<std::size_t>(i)] + L"\n";
+    }
+    MessageBoxW(m_hwnd, msg.c_str(), L"Recent Audit Trail", MB_OK | MB_ICONINFORMATION);
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::setupPerformanceMode() {
+    double mode = static_cast<double>(
+        m_perfMode == PerformanceMode::Quality ? 1 :
+        (m_perfMode == PerformanceMode::Balanced ? 2 : 3));
+    if (!promptSingle(L"Performance Mode",
+                      L"Choose mode (1=Quality, 2=Balanced, 3=Speed):",
+                      mode, mode))
+        return;
+    int m = static_cast<int>(std::round(mode));
+    if (m < 1 || m > 3) {
+        MessageBoxW(m_hwnd, L"Invalid mode. Use 1, 2, or 3.",
+                    L"Performance Mode", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    m_perfMode = (m == 1) ? PerformanceMode::Quality
+              : (m == 2) ? PerformanceMode::Balanced
+                         : PerformanceMode::Speed;
+#if defined(CAMEXPERT_USE_OPENMP)
+    const wchar_t* ompText = L"OpenMP acceleration: available";
+#else
+    const wchar_t* ompText = L"OpenMP acceleration: unavailable (deterministic fallback active)";
+#endif
+    std::wstring modeText =
+        (m_perfMode == PerformanceMode::Quality)  ? L"Quality"
+      : (m_perfMode == PerformanceMode::Balanced) ? L"Balanced"
+                                                  : L"Speed";
+    std::wstring status = L"Performance mode set: " + modeText + L". " + ompText;
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(status.c_str()));
+    appendAudit(L"Performance mode changed to " + modeText);
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::showWorkflowGuidance() {
+    std::wstring msg =
+        L"Suggested next steps for this session:\n\n"
+        L"1) Setup Constraints: define sketch relations and run solve diagnostics.\n"
+        L"2) Setup Tool/Material DB: sync or edit rows, then apply DB to libraries.\n"
+        L"3) Setup Post Profile: load/validate active profile before posting.\n"
+        L"4) Generate/Regenerate toolpaths, then run Verify / Machine Sim.\n"
+        L"5) Post-process and review Recent Audit Trail.\n\n";
+
+    if (m_toolpathMgr && m_toolpathMgr->count() > 0) {
+        int dirtyCount = 0;
+        for (int i = 0; i < m_toolpathMgr->count(); ++i)
+            if (m_toolpathMgr->at(i).isDirty()) ++dirtyCount;
+        msg += L"Current session: " + std::to_wstring(m_toolpathMgr->count())
+            + L" toolpath(s), " + std::to_wstring(dirtyCount) + L" dirty.\n";
+    } else {
+        msg += L"Current session: no toolpaths yet.\n";
+    }
+    msg += L"Active post profile: "
+        + (m_activePostProfilePath.empty() ? std::wstring(L"(none)") : toWideFromUtf8(m_activePostProfilePath));
+    MessageBoxW(m_hwnd, msg.c_str(), L"Workflow Guidance", MB_OK | MB_ICONINFORMATION);
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::setupPostProfile() {
+    double action = 1.0;
+    if (!promptSingle(L"Setup Post Profile",
+                      L"Choose action (1=Load, 2=Validate, 3=Clear, 4=Preview):",
+                      action, action))
+        return;
+    const int choice = static_cast<int>(std::round(action));
+
+    if (choice == 1) {
+        wchar_t szFile[MAX_PATH] = {};
+        OPENFILENAMEW ofn{};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner   = m_hwnd;
+        ofn.lpstrFilter =
+            L"Post Profile (*.txt;*.cfg;*.ini)\0*.txt;*.cfg;*.ini\0"
+            L"All Files (*.*)\0*.*\0";
+        ofn.lpstrFile = szFile;
+        ofn.nMaxFile  = MAX_PATH;
+        ofn.Flags     = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+        if (!GetOpenFileNameW(&ofn)) return;
+
+        PostProcessor pp;
+        std::string err;
+        std::string path = toUtf8FromWide(szFile);
+        if (!pp.loadScriptProfile(path, &err)) {
+            std::wstring werr = toWideFromUtf8(err);
+            MessageBoxW(m_hwnd, werr.c_str(), L"Post Profile Error", MB_OK | MB_ICONWARNING);
+            appendAudit(L"Post profile load failed");
+            return;
+        }
+        m_activePostProfilePath = path;
+        std::wstring status = L"Post profile loaded: " + std::wstring(szFile);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(status.c_str()));
+        appendAudit(L"Post profile loaded");
+        return;
+    }
+
+    if (choice == 2) {
+        if (m_activePostProfilePath.empty()) {
+            MessageBoxW(m_hwnd, L"No active post profile path is set.",
+                        L"Post Profile", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+        PostProcessor pp;
+        std::string err;
+        if (!pp.loadScriptProfile(m_activePostProfilePath, &err)) {
+            std::wstring werr = toWideFromUtf8(err);
+            MessageBoxW(m_hwnd, werr.c_str(), L"Post Profile Validation", MB_OK | MB_ICONWARNING);
+            appendAudit(L"Post profile validation failed");
+            return;
+        }
+        MessageBoxW(m_hwnd, L"Post profile validated successfully.",
+                    L"Post Profile Validation", MB_OK | MB_ICONINFORMATION);
+        appendAudit(L"Post profile validated");
+        return;
+    }
+
+    if (choice == 3) {
+        m_activePostProfilePath.clear();
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+                    reinterpret_cast<LPARAM>(L"Active post profile cleared."));
+        appendAudit(L"Post profile cleared");
+        return;
+    }
+
+    if (choice == 4) {
+        std::wstring preview = L"Post profile preview\n\nActive profile: ";
+        preview += m_activePostProfilePath.empty() ? L"(none)" : toWideFromUtf8(m_activePostProfilePath);
+        preview += L"\n\nA loaded profile will be applied automatically on Post.";
+        MessageBoxW(m_hwnd, preview.c_str(), L"Post Profile Preview", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    MessageBoxW(m_hwnd, L"Invalid action. Use 1-4.",
+                L"Setup Post Profile", MB_OK | MB_ICONWARNING);
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::setupConstraints() {
+    if (!m_wfScene) return;
+    double action = 1.0;
+    if (!promptSingle(L"Setup Constraints",
+                      L"Action (1=Add Coincident, 2=Add Horizontal, 3=Add Vertical, 4=Add Distance, 5=List, 6=Delete, 7=Solve, 8=Clear):",
+                      action, action))
+        return;
+    const int choice = static_cast<int>(std::round(action));
+
+    auto selected = m_wfScene->selectedIndices();
+    if (choice == 1) {
+        if (selected.size() < 2) {
+            MessageBoxW(m_hwnd, L"Select at least 2 entities first for Coincident.",
+                        L"Constraints", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        SketchConstraint c;
+        c.type = SketchConstraintType::Coincident;
+        c.a.entityIndex = selected[0];
+        c.b.entityIndex = selected[1];
+        int id = m_constraintSolver.addConstraint(c);
+        std::wstring msg = L"Added Coincident constraint ID " + std::to_wstring(id) + L".";
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg.c_str()));
+        appendAudit(msg);
+        return;
+    }
+    if (choice == 2 || choice == 3) {
+        if (selected.empty()) {
+            MessageBoxW(m_hwnd, L"Select a line entity first.",
+                        L"Constraints", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        SketchConstraint c;
+        c.type = (choice == 2) ? SketchConstraintType::Horizontal : SketchConstraintType::Vertical;
+        c.a.entityIndex = selected[0];
+        int id = m_constraintSolver.addConstraint(c);
+        std::wstring msg = std::wstring(L"Added ")
+            + (choice == 2 ? L"Horizontal" : L"Vertical")
+            + L" constraint ID " + std::to_wstring(id) + L".";
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg.c_str()));
+        appendAudit(msg);
+        return;
+    }
+    if (choice == 4) {
+        if (selected.size() < 2) {
+            MessageBoxW(m_hwnd, L"Select at least 2 entities first for Distance.",
+                        L"Constraints", MB_OK | MB_ICONWARNING);
+            return;
+        }
+        double distanceMm = 10.0;
+        if (!promptSingle(L"Distance Constraint", L"Distance (mm):", distanceMm, distanceMm))
+            return;
+        SketchConstraint c;
+        c.type = SketchConstraintType::Distance;
+        c.value = distanceMm;
+        c.a.entityIndex = selected[0];
+        c.b.entityIndex = selected[1];
+        int id = m_constraintSolver.addConstraint(c);
+        std::wstring msg = L"Added Distance constraint ID " + std::to_wstring(id)
+            + L" (" + std::to_wstring(distanceMm) + L" mm).";
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg.c_str()));
+        appendAudit(msg);
+        return;
+    }
+    if (choice == 5) {
+        std::wstring list = L"Constraints\n\n";
+        const auto& cs = m_constraintSolver.constraints();
+        if (cs.empty()) {
+            list += L"(none)";
+        } else {
+            for (const auto& c : cs) {
+                list += L"ID " + std::to_wstring(c.id) + L"  "
+                    + constraintTypeName(c.type)
+                    + L"  A=" + std::to_wstring(c.a.entityIndex)
+                    + L"  B=" + std::to_wstring(c.b.entityIndex);
+                if (c.type == SketchConstraintType::Distance ||
+                    c.type == SketchConstraintType::Angle ||
+                    c.type == SketchConstraintType::Radius) {
+                    wchar_t v[48] = {};
+                    std::swprintf(v, 48, L"  v=%.4g", c.value);
+                    list += v;
+                }
+                list += L"\n";
+            }
+        }
+        MessageBoxW(m_hwnd, list.c_str(), L"Constraint List", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    if (choice == 6) {
+        double idd = 1.0;
+        if (!promptSingle(L"Delete Constraint", L"Constraint ID:", idd, idd))
+            return;
+        if (m_constraintSolver.removeConstraint(static_cast<int>(std::round(idd)))) {
+            SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(L"Constraint deleted."));
+            appendAudit(L"Constraint deleted");
+        } else {
+            MessageBoxW(m_hwnd, L"Constraint ID not found.",
+                        L"Constraints", MB_OK | MB_ICONWARNING);
+        }
+        return;
+    }
+    if (choice == 7) {
+        auto& ents = const_cast<std::vector<WfEntity>&>(m_wfScene->entities());
+        SolveResult sr = m_constraintSolver.solve(ents);
+        if (m_viewport) m_viewport->redraw();
+        std::wstring diag = L"Solve status: ";
+        diag += solveStatusName(sr.status);
+        diag += L"\nIterations: " + std::to_wstring(sr.iterations)
+             +  L"\nApplied: " + std::to_wstring(sr.appliedCount)
+             +  L"\nWarnings: " + std::to_wstring(static_cast<int>(sr.diagnostics.size()));
+        int maxDiag = std::min<int>(6, static_cast<int>(sr.diagnostics.size()));
+        for (int i = 0; i < maxDiag; ++i) {
+            const auto& d = sr.diagnostics[static_cast<std::size_t>(i)];
+            diag += L"\n- [ID " + std::to_wstring(d.constraintId) + L"] " + toWideFromUtf8(d.message);
+        }
+        MessageBoxW(m_hwnd, diag.c_str(), L"Constraint Diagnostics", MB_OK | MB_ICONINFORMATION);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+                    reinterpret_cast<LPARAM>(L"Constraints solved; diagnostics available."));
+        appendAudit(L"Constraint solve executed");
+        return;
+    }
+    if (choice == 8) {
+        m_constraintSolver.clearConstraints();
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(L"All constraints cleared."));
+        appendAudit(L"All constraints cleared");
+        return;
+    }
+
+    MessageBoxW(m_hwnd, L"Invalid action. Use 1-8.", L"Constraints", MB_OK | MB_ICONWARNING);
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::setupToolDatabase() {
+    double action = 1.0;
+    if (!promptSingle(L"Setup Tool/Material Database",
+                      L"Action (1=Summary, 2=Search material, 3=Upsert tool, 4=Upsert material, 5=Upsert cutting data, 6=Export SQL, 7=Apply DB->libraries, 8=Sync libraries->DB):",
+                      action, action))
+        return;
+    const int choice = static_cast<int>(std::round(action));
+
+    if (choice == 1) {
+        std::wstring msg = L"SQL cache summary\n\nTools: "
+            + std::to_wstring(m_sqlToolDb.tools().size())
+            + L"\nMaterials: " + std::to_wstring(m_sqlToolDb.materials().size())
+            + L"\nCutting rows: " + std::to_wstring(m_sqlToolDb.cuttingData().size());
+        if (!m_sqlToolDb.materials().empty()) {
+            msg += L"\n\nMaterials (first 10):";
+            int n = std::min<int>(10, static_cast<int>(m_sqlToolDb.materials().size()));
+            for (int i = 0; i < n; ++i)
+                msg += L"\n- " + toWideFromUtf8(m_sqlToolDb.materials()[static_cast<std::size_t>(i)].key);
+        }
+        MessageBoxW(m_hwnd, msg.c_str(), L"Tool/Material DB Summary", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    if (choice == 2) {
+        double matClass = 1.0;
+        if (!promptSingle(L"Search Material", L"Material class (0=Al,1=Steel,2=SS,3=Ti,...):",
+                          matClass, matClass)) {
+            return;
+        }
+        int cls = std::max(0, static_cast<int>(std::round(matClass)));
+        std::wstring msg = L"Matches for class " + std::to_wstring(cls) + L":\n";
+        int matches = 0;
+        for (const auto& m : m_sqlToolDb.materials()) {
+            if (static_cast<int>(m.material.matClass) == cls) {
+                msg += L"- " + toWideFromUtf8(m.key) + L"\n";
+                if (++matches >= 20) break;
+            }
+        }
+        if (matches == 0) msg += L"(none)";
+        MessageBoxW(m_hwnd, msg.c_str(), L"Search Material", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    if (choice == 3) {
+        double toolId = 1001.0, dia = 10.0, flutes = 4.0;
+        if (!promptTriple(L"Upsert Tool Row",
+                          L"Tool ID (integer):", toolId, toolId,
+                          L"Diameter (mm):", dia, dia,
+                          L"Flutes (integer):", flutes, flutes))
+            return;
+        SqlToolRow row;
+        row.key = "tool_" + std::to_string(static_cast<int>(std::round(toolId)));
+        row.tool.id = static_cast<int>(std::round(toolId));
+        row.tool.name = row.key;
+        row.tool.diameter = dia;
+        row.tool.numFlutes = std::max(1, static_cast<int>(std::round(flutes)));
+        m_sqlToolDb.upsertTool(row);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(L"Tool row upserted into SQL cache."));
+        appendAudit(L"Tool DB row upserted");
+        return;
+    }
+
+    if (choice == 4) {
+        double matClass = 1.0, vcMin = 120.0, vcMax = 240.0;
+        if (!promptTriple(L"Upsert Material Row",
+                          L"Material class (0=Al,1=Steel,2=SS,3=Ti,4=Inconel,...):", matClass, matClass,
+                          L"Surface speed min (m/min):", vcMin, vcMin,
+                          L"Surface speed max (m/min):", vcMax, vcMax))
+            return;
+        SqlMaterialRow row;
+        row.key = "mat_" + std::to_string(static_cast<int>(std::round(matClass)));
+        row.material.matClass = static_cast<MaterialClass>(std::max(0, static_cast<int>(std::round(matClass))));
+        row.material.name = row.key;
+        row.material.surfaceSpeedMin = vcMin;
+        row.material.surfaceSpeedMax = std::max(vcMin, vcMax);
+        m_sqlToolDb.upsertMaterial(row);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(L"Material row upserted into SQL cache."));
+        appendAudit(L"Material DB row upserted");
+        return;
+    }
+
+    if (choice == 5) {
+        double toolId = 1001.0, matClass = 1.0, vcMin = 100.0;
+        if (!promptTriple(L"Upsert Cutting Data Row",
+                          L"Tool ID key suffix:", toolId, toolId,
+                          L"Material class:", matClass, matClass,
+                          L"Surface speed min (m/min):", vcMin, vcMin))
+            return;
+        SqlCuttingDataRow row;
+        row.toolKey = "tool_" + std::to_string(static_cast<int>(std::round(toolId)));
+        row.materialClass = static_cast<MaterialClass>(std::max(0, static_cast<int>(std::round(matClass))));
+        row.nominalDiameter = 10.0;
+        row.surfaceSpeedMin = vcMin;
+        row.surfaceSpeedMax = vcMin * 1.5;
+        row.feedPerToothMin = 0.02;
+        row.feedPerToothMax = 0.06;
+        row.recommendedAxialDepth = 6.0;
+        row.recommendedRadialDepth = 2.5;
+        m_sqlToolDb.upsertCuttingData(row);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(L"Cutting-data row upserted into SQL cache."));
+        appendAudit(L"Cutting-data row upserted");
+        return;
+    }
+
+    if (choice == 6) {
+        wchar_t szFile[MAX_PATH] = {};
+        OPENFILENAMEW ofn{};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner   = m_hwnd;
+        ofn.lpstrFilter = L"SQL Files (*.sql)\0*.sql\0All Files (*.*)\0*.*\0";
+        ofn.lpstrFile   = szFile;
+        ofn.nMaxFile    = MAX_PATH;
+        ofn.lpstrDefExt = L"sql";
+        ofn.Flags       = OFN_OVERWRITEPROMPT;
+        if (!GetSaveFileNameW(&ofn)) return;
+        std::ofstream out(toUtf8FromWide(szFile), std::ios::binary);
+        if (!out.good()) {
+            MessageBoxW(m_hwnd, L"Failed to open output SQL file.",
+                        L"Export SQL Snapshot", MB_OK | MB_ICONERROR);
+            return;
+        }
+        out << m_sqlToolDb.exportSqlSnapshot();
+        out.close();
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(L"SQL snapshot exported."));
+        appendAudit(L"SQL snapshot exported");
+        return;
+    }
+
+    if (choice == 7) {
+        m_materialLib.importFromSqlDatabase(m_sqlToolDb);
+        m_cloudToolLib.importFromSqlDatabase(m_sqlToolDb, true);
+        if (m_copilotEngine) m_copilotEngine->setMaterialLibrary(&m_materialLib);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+                    reinterpret_cast<LPARAM>(L"SQL cache applied to material/cloud libraries."));
+        appendAudit(L"SQL cache applied to runtime libraries");
+        return;
+    }
+
+    if (choice == 8) {
+        m_sqlToolDb.clear();
+        m_materialLib.exportToSqlDatabase(m_sqlToolDb);
+        m_cloudToolLib.exportToSqlDatabase(m_sqlToolDb);
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+                    reinterpret_cast<LPARAM>(L"SQL cache refreshed from current libraries."));
+        appendAudit(L"SQL cache refreshed from runtime libraries");
+        return;
+    }
+
+    MessageBoxW(m_hwnd, L"Invalid action. Use 1-8.",
+                L"Tool/Material Database", MB_OK | MB_ICONWARNING);
 }
 
 // --------------------------------------------------------------------------
@@ -5275,11 +5900,15 @@ static const NurbsSurface* getActiveSurface(const SurfacesManager* mgr) {
 // --------------------------------------------------------------------------
 void MainWindow::generate3DWaterline()
 {
-    double toolDiam = 12.0, topZ = 0.0, bottomZ = -30.0, zStep = 1.0;
+    double toolDiam = m_promptDefaults.waterlineToolDiam;
+    double topZ = 0.0, bottomZ = -30.0;
+    double zStep = m_promptDefaults.waterlineZStep;
     if (!promptDouble2(L"3D Waterline",
                        L"Tool diameter (mm):", toolDiam, toolDiam,
                        L"Z step (mm):",        zStep,    zStep))
         return;
+    m_promptDefaults.waterlineToolDiam = toolDiam;
+    m_promptDefaults.waterlineZStep    = zStep;
 
     if (toolDiam <= 0 || zStep <= 0) {
         MessageBoxW(m_hwnd, L"Tool diameter and Z-step must be positive.",
@@ -5312,6 +5941,13 @@ void MainWindow::generate3DWaterline()
     wp.zStep   = zStep;
     wp.stepOver = 0.4;
     wp.stockAllowance = 0.0;
+    if (m_perfMode == PerformanceMode::Quality) {
+        wp.zStep *= 0.75;
+        params.feedRate *= 0.9;
+    } else if (m_perfMode == PerformanceMode::Speed) {
+        wp.zStep *= 1.35;
+        params.feedRate *= 1.2;
+    }
 
     const NurbsSurface* surf = getActiveSurface(m_surfacesMgr.get());
     Toolpath tp;
@@ -5332,10 +5968,16 @@ void MainWindow::generate3DWaterline()
     m_toolpathMgr->addToolpath(std::move(tp));
 
     wchar_t statusMsg[200] = {};
+#if defined(CAMEXPERT_USE_OPENMP)
+    const wchar_t* ompMode = L"OpenMP ON";
+#else
+    const wchar_t* ompMode = L"OpenMP fallback";
+#endif
     std::swprintf(statusMsg, 200,
-        L"3D Waterline generated: Ø%.4g mm, Z %.4g→%.4g mm, step %.4g mm.",
-        toolDiam, topZ, bottomZ, zStep);
+        L"3D Waterline generated: Ø%.4g mm, Z %.4g→%.4g mm, step %.4g mm (%ls).",
+        toolDiam, topZ, bottomZ, wp.zStep, ompMode);
     SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+    appendAudit(L"3D Waterline generated");
 }
 
 // --------------------------------------------------------------------------
@@ -5343,11 +5985,14 @@ void MainWindow::generate3DWaterline()
 // --------------------------------------------------------------------------
 void MainWindow::generate3DScallop()
 {
-    double toolDiam = 8.0, stepOver = 0.5;
+    double toolDiam = m_promptDefaults.scallopToolDiam;
+    double stepOver = m_promptDefaults.scallopStepOver;
     if (!promptDouble2(L"3D Scallop",
                        L"Tool diameter (mm):", toolDiam, toolDiam,
                        L"Step-over   (mm):",   stepOver, stepOver))
         return;
+    m_promptDefaults.scallopToolDiam = toolDiam;
+    m_promptDefaults.scallopStepOver = stepOver;
 
     if (toolDiam <= 0 || stepOver <= 0) {
         MessageBoxW(m_hwnd, L"Tool diameter and step-over must be positive.",
@@ -5370,6 +6015,13 @@ void MainWindow::generate3DScallop()
     Strategies3D::ScallopParams sp;
     sp.stepOver       = stepOver;
     sp.stockAllowance = 0.0;
+    if (m_perfMode == PerformanceMode::Quality) {
+        sp.stepOver *= 0.8;
+        params.feedRate *= 0.9;
+    } else if (m_perfMode == PerformanceMode::Speed) {
+        sp.stepOver *= 1.3;
+        params.feedRate *= 1.15;
+    }
 
     const NurbsSurface* surf = getActiveSurface(m_surfacesMgr.get());
     Toolpath tp;
@@ -5390,8 +6042,9 @@ void MainWindow::generate3DScallop()
     wchar_t statusMsg[240] = {};
     std::swprintf(statusMsg, 240,
         L"3D Scallop generated: Ø%.4g mm, step-over %.4g mm → scallop h=%.4f mm.",
-        toolDiam, stepOver, h);
+        toolDiam, sp.stepOver, h);
     SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+    appendAudit(L"3D Scallop generated");
 }
 
 // --------------------------------------------------------------------------
@@ -5399,12 +6052,17 @@ void MainWindow::generate3DScallop()
 // --------------------------------------------------------------------------
 void MainWindow::generate3DRaster()
 {
-    double toolDiam = 10.0, stepOver = 0.5, angle = 0.0;
+    double toolDiam = m_promptDefaults.rasterToolDiam;
+    double stepOver = m_promptDefaults.rasterStepOver;
+    double angle    = m_promptDefaults.rasterAngleDeg;
     if (!promptTriple(L"3D Raster",
                       L"Tool diameter (mm):", toolDiam, toolDiam,
                       L"Step-over   (mm):",   stepOver, stepOver,
                       L"Raster angle (deg):", angle,    angle))
         return;
+    m_promptDefaults.rasterToolDiam = toolDiam;
+    m_promptDefaults.rasterStepOver = stepOver;
+    m_promptDefaults.rasterAngleDeg = angle;
 
     if (toolDiam <= 0 || stepOver <= 0) {
         MessageBoxW(m_hwnd, L"Tool diameter and step-over must be positive.",
@@ -5425,6 +6083,13 @@ void MainWindow::generate3DRaster()
     rp.stepOver       = stepOver;
     rp.angle          = angle;
     rp.stockAllowance = 0.0;
+    if (m_perfMode == PerformanceMode::Quality) {
+        rp.stepOver *= 0.8;
+        params.feedRate *= 0.9;
+    } else if (m_perfMode == PerformanceMode::Speed) {
+        rp.stepOver *= 1.3;
+        params.feedRate *= 1.15;
+    }
 
     // Raster uses mesh data; build a simple flat mesh from the active solid
     // bounding box if no mesh is loaded.
@@ -5462,8 +6127,9 @@ void MainWindow::generate3DRaster()
     wchar_t statusMsg[200] = {};
     std::swprintf(statusMsg, 200,
         L"3D Raster generated: Ø%.4g mm, step %.4g mm, %.4g° angle.",
-        toolDiam, stepOver, angle);
+        toolDiam, rp.stepOver, angle);
     SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+    appendAudit(L"3D Raster generated");
 }
 
 // --------------------------------------------------------------------------
@@ -5471,11 +6137,14 @@ void MainWindow::generate3DRaster()
 // --------------------------------------------------------------------------
 void MainWindow::generate5AxisSwarf()
 {
-    double toolDiam = 16.0, leadAngle = 5.0;
+    double toolDiam = m_promptDefaults.swarfToolDiam;
+    double leadAngle = m_promptDefaults.swarfLeadAngle;
     if (!promptDouble2(L"5-Axis Swarf",
                        L"Tool diameter (mm):", toolDiam,  toolDiam,
                        L"Lead angle   (deg):", leadAngle, leadAngle))
         return;
+    m_promptDefaults.swarfToolDiam = toolDiam;
+    m_promptDefaults.swarfLeadAngle = leadAngle;
 
     if (toolDiam <= 0) {
         MessageBoxW(m_hwnd, L"Tool diameter must be positive.",
@@ -5492,6 +6161,11 @@ void MainWindow::generate5AxisSwarf()
     params.feedRate   = 1200.0;
     params.plungeRate = 200.0;
     params.spindleRPM = 10000;
+    if (m_perfMode == PerformanceMode::Quality) {
+        params.feedRate *= 0.9;
+    } else if (m_perfMode == PerformanceMode::Speed) {
+        params.feedRate *= 1.2;
+    }
 
     MultiAxisParams maParams;
     maParams.leadLag   = MultiAxisParams::LeadLag::LeadFwd;
@@ -5525,4 +6199,5 @@ void MainWindow::generate5AxisSwarf()
         L"5-Axis Swarf generated: Ø%.4g mm, lead %.4g°, %d points.",
         toolDiam, leadAngle, static_cast<int>(m_toolpathMgr->at(m_toolpathMgr->count()-1).points().size()));
     SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(statusMsg));
+    appendAudit(L"5-Axis swarf generated");
 }

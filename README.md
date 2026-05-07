@@ -291,6 +291,17 @@ A clean launch produces no error dialogs.
 | 6a | **Machine → Backplot** | Wireframe tool animation plays without crash |
 | 6b | **Machine → Verify** | Z-map stock model updates; no gouge alerts on valid toolpath |
 
+### 7. Setup usability workflows (manual QA checklist)
+
+| Step | Action | Expected result |
+|------|--------|----------------|
+| 7a | **Machine → Setup Constraints** → add two constraints, then solve | Diagnostics dialog appears with solve status and applied-count details |
+| 7b | **Machine → Setup Post Profile** → load/validate profile | Success message shown; profile remains active for later posting |
+| 7c | **Machine → Setup Tool/Material DB** → upsert rows and export SQL | SQL snapshot file is written and status bar confirms export |
+| 7d | **Machine → Setup Tool/Material DB** → apply DB to libraries | Status message confirms runtime libraries were synced from SQL cache |
+| 7e | **Machine → Setup Performance Mode** | Mode change is reported with OpenMP availability/fallback text |
+| 7f | **Machine → Context Guidance** and **Recent Audit Trail** | Guidance and recent operation list dialogs show actionable session info |
+
 > **Tip:** Use `build/Debug/CAMExpert.exe` when investigating failures – the debug build
 > includes assertions and richer diagnostic output.
 
