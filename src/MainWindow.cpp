@@ -3037,8 +3037,8 @@ void MainWindow::createWireframe(int commandId) {
             if (a.x != b.x) return a.x < b.x;
             return a.y < b.y;
         });
-        pts.erase(std::unique(pts.begin(), pts.end(), [](const Geom::Vec2& a, const Geom::Vec2& b) {
-            return std::abs(a.x - b.x) < 1e-9 && std::abs(a.y - b.y) < 1e-9;
+        pts.erase(std::unique(pts.begin(), pts.end(), [kEps](const Geom::Vec2& a, const Geom::Vec2& b) {
+            return std::abs(a.x - b.x) < kEps && std::abs(a.y - b.y) < kEps;
         }), pts.end());
         if (pts.size() < 3) return hull;
 
