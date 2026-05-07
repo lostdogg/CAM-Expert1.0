@@ -1,4 +1,5 @@
 #include "MaterialLibrary.h"
+#include "SqlToolDatabase.h"
 #include <cmath>
 #include <algorithm>
 #include <cctype>
@@ -335,4 +336,24 @@ FeedSpeedResult MaterialLibrary::calculate(const CuttingTool& tool,
 FeedSpeedResult MaterialLibrary::calculate(const CuttingTool& tool,
                                             MaterialClass cls) const {
     return calculate(tool, get(cls));
+}
+
+// --------------------------------------------------------------------------
+void MaterialLibrary::exportToSqlDatabase(SqlToolDatabase& db) const {
+    for (const auto& m : m_materials) {
+        SqlMaterialRow row;
+        row.key = m.name;
+        row.material = m;
+        db.upsertMaterial(row);
+    }
+}
+
+// --------------------------------------------------------------------------
+void MaterialLibrary::importFromSqlDatabase(const SqlToolDatabase& db) {
+    if (db.materials().empty())
+        return;
+    m_materials.clear();
+    m_materials.reserve(db.materials().size());
+    for (const auto& row : db.materials())
+        m_materials.push_back(row.material);
 }

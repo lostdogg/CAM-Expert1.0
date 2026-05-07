@@ -5,10 +5,105 @@
 #include <iomanip>
 #include <fstream>
 #include <cmath>
+#include <algorithm>
+#include <cctype>
 
 // --------------------------------------------------------------------------
 PostProcessor::PostProcessor(PostConfig cfg)
     : m_cfg(std::move(cfg)) {}
+
+namespace {
+static std::string trim(const std::string& s) {
+    std::size_t b = 0;
+    while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
+    std::size_t e = s.size();
+    while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
+    return s.substr(b, e - b);
+}
+
+static std::string lower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    return s;
+}
+
+static bool parseBool(const std::string& v, bool& out) {
+    std::string x = lower(trim(v));
+    if (x == "1" || x == "true" || x == "yes" || x == "on") { out = true; return true; }
+    if (x == "0" || x == "false" || x == "no" || x == "off") { out = false; return true; }
+    return false;
+}
+
+static std::string replaceAll(std::string s, const std::string& find, const std::string& repl) {
+    std::size_t p = 0;
+    while ((p = s.find(find, p)) != std::string::npos) {
+        s.replace(p, find.size(), repl);
+        p += repl.size();
+    }
+    return s;
+}
+}
+
+bool PostProcessor::loadScriptProfile(const std::string& filePath, std::string* errorOut) {
+    std::ifstream f(filePath);
+    if (!f.is_open()) {
+        if (errorOut) *errorOut = "Unable to open script profile: " + filePath;
+        return false;
+    }
+
+    clearScriptProfile();
+    std::string line;
+    int lineNo = 0;
+    while (std::getline(f, line)) {
+        ++lineNo;
+        std::string s = trim(line);
+        if (s.empty() || s[0] == '#') continue;
+        auto eq = s.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = lower(trim(s.substr(0, eq)));
+        std::string val = trim(s.substr(eq + 1));
+        m_scriptVars[key] = val;
+    }
+
+    auto get = [&](const std::string& k) -> const std::string* {
+        auto it = m_scriptVars.find(k);
+        return (it == m_scriptVars.end()) ? nullptr : &it->second;
+    };
+
+    if (const auto* v = get("controller")) {
+        std::string x = lower(*v);
+        if (x == "fanuc") m_cfg.controller = ControllerType::Fanuc;
+        else if (x == "haas") m_cfg.controller = ControllerType::Haas;
+        else if (x == "heidenhain") m_cfg.controller = ControllerType::Heidenhain;
+        else if (x == "siemens" || x == "siemenssinumerik") m_cfg.controller = ControllerType::SiemensSinumerik;
+        else if (x == "mazak") m_cfg.controller = ControllerType::Mazak;
+        else if (x == "okuma") m_cfg.controller = ControllerType::Okuma;
+        else if (x == "mitsubishim70") m_cfg.controller = ControllerType::MitsubishiM70;
+        else m_cfg.controller = ControllerType::Generic;
+    }
+    if (const auto* v = get("program_number")) m_cfg.programNumber = *v;
+    if (const auto* v = get("program_comment")) m_cfg.programComment = *v;
+    if (const auto* v = get("fourth_axis_name")) m_cfg.fourthAxisName = *v;
+    if (const auto* v = get("fifth_axis_name")) m_cfg.fifthAxisName = *v;
+    if (const auto* v = get("decimal_places")) {
+        try { m_cfg.decimalPlaces = std::max(0, std::stoi(*v)); } catch (...) {}
+    }
+    if (const auto* v = get("modal_codes")) { bool b = m_cfg.modalCodes; if (parseBool(*v, b)) m_cfg.modalCodes = b; }
+    if (const auto* v = get("use_absolute")) { bool b = m_cfg.useAbsolute; if (parseBool(*v, b)) m_cfg.useAbsolute = b; }
+    if (const auto* v = get("metric_mode")) { bool b = m_cfg.metricMode; if (parseBool(*v, b)) m_cfg.metricMode = b; }
+    if (const auto* v = get("safe_start")) { bool b = m_cfg.outputSafeStart; if (parseBool(*v, b)) m_cfg.outputSafeStart = b; }
+    if (const auto* v = get("tool_change")) { bool b = m_cfg.outputToolChange; if (parseBool(*v, b)) m_cfg.outputToolChange = b; }
+    if (const auto* v = get("program_end")) { bool b = m_cfg.outputM30; if (parseBool(*v, b)) m_cfg.outputM30 = b; }
+
+    m_scriptEnabled = true;
+    (void)lineNo;
+    return true;
+}
+
+void PostProcessor::clearScriptProfile() {
+    m_scriptVars.clear();
+    m_scriptEnabled = false;
+}
 
 // --------------------------------------------------------------------------
 std::string PostProcessor::coord(double val) const {
@@ -78,6 +173,16 @@ std::string PostProcessor::toolChangeBlock(const CuttingTool& tool) {
     if (m_cfg.outputToolChange) {
         // Safety retract before tool change (prevents crashes during swap)
         oss << safetyRetractBlock();
+        if (m_scriptEnabled) {
+            auto it = m_scriptVars.find("tool_change_template");
+            if (it != m_scriptVars.end()) {
+                std::string tpl = it->second;
+                tpl = replaceAll(tpl, "{tool}", std::to_string(tool.id));
+                tpl = replaceAll(tpl, "{tool_name}", tool.name);
+                oss << tpl << "\n";
+                return oss.str();
+            }
+        }
         oss << "T" << tool.id << " M06 (" << tool.name << ")\n";
     }
     return oss.str();
@@ -85,6 +190,14 @@ std::string PostProcessor::toolChangeBlock(const CuttingTool& tool) {
 
 // --------------------------------------------------------------------------
 std::string PostProcessor::spindleBlock(double rpm, bool cw) {
+    if (m_scriptEnabled) {
+        auto key = cw ? "spindle_cw_template" : "spindle_ccw_template";
+        auto it = m_scriptVars.find(key);
+        if (it != m_scriptVars.end()) {
+            std::string tpl = replaceAll(it->second, "{rpm}", std::to_string(static_cast<int>(rpm)));
+            return tpl + "\n";
+        }
+    }
     std::ostringstream oss;
     oss << "S" << static_cast<int>(rpm)
         << (cw ? " M03" : " M04") << "\n";
@@ -93,7 +206,27 @@ std::string PostProcessor::spindleBlock(double rpm, bool cw) {
 
 // --------------------------------------------------------------------------
 std::string PostProcessor::coolantBlock(CuttingParams::Coolant c, bool on) {
-    if (!on) return "M09\n";
+    if (!on) {
+        if (m_scriptEnabled) {
+            auto it = m_scriptVars.find("coolant_off");
+            if (it != m_scriptVars.end()) return it->second + "\n";
+        }
+        return "M09\n";
+    }
+    if (m_scriptEnabled) {
+        const char* key = nullptr;
+        switch (c) {
+        case CuttingParams::Coolant::Flood:       key = "coolant_flood_on"; break;
+        case CuttingParams::Coolant::Mist:        key = "coolant_mist_on"; break;
+        case CuttingParams::Coolant::ThroughTool: key = "coolant_through_on"; break;
+        case CuttingParams::Coolant::Air:         key = "coolant_air_on"; break;
+        default: break;
+        }
+        if (key) {
+            auto it = m_scriptVars.find(key);
+            if (it != m_scriptVars.end()) return it->second + "\n";
+        }
+    }
     switch (c) {
     case CuttingParams::Coolant::Flood:       return "M08\n";
     case CuttingParams::Coolant::Mist:        return "M07\n";

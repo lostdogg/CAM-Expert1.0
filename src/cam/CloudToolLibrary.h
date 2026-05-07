@@ -9,6 +9,8 @@
 #include <unordered_map>
 #include <memory>
 
+class SqlToolDatabase;
+
 // --------------------------------------------------------------------------
 // CloudToolLibrary – Manufacturer-Linked Digital Tool Data
 //
@@ -216,6 +218,10 @@ public:
 
     // All tools in the cache
     const std::vector<ToolDigitalTwin>& allTools() const { return m_tools; }
+
+    // SQL single-source-of-truth integration
+    void exportToSqlDatabase(SqlToolDatabase& db) const;
+    void importFromSqlDatabase(const SqlToolDatabase& db, bool replaceExisting = true);
 
 private:
     std::vector<ToolDigitalTwin>       m_tools;

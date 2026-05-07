@@ -7,6 +7,8 @@
 #include <vector>
 #include <unordered_map>
 
+class SqlToolDatabase;
+
 // --------------------------------------------------------------------------
 // MaterialLibrary
 //
@@ -138,6 +140,10 @@ public:
     // Convenience overload: look up material by class first
     FeedSpeedResult calculate(const CuttingTool& tool,
                                MaterialClass cls) const;
+
+    // SQL single-source-of-truth integration
+    void exportToSqlDatabase(SqlToolDatabase& db) const;
+    void importFromSqlDatabase(const SqlToolDatabase& db);
 
 private:
     void loadDefaults();

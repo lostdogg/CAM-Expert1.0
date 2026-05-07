@@ -1,4 +1,5 @@
 #include "CloudToolLibrary.h"
+#include "SqlToolDatabase.h"
 #include <cmath>
 #include <algorithm>
 #include <cctype>
@@ -369,4 +370,92 @@ void CloudToolLibrary::registerCuttingData(ManufacturerCuttingData data) {
         }
     }
     m_cuttingData.push_back(std::move(data));
+}
+
+// --------------------------------------------------------------------------
+void CloudToolLibrary::exportToSqlDatabase(SqlToolDatabase& db) const {
+    for (const auto& t : m_tools) {
+        SqlToolRow row;
+        row.key = t.catalogueNumber;
+        row.tool.id = 0;
+        row.tool.name = t.description;
+        row.tool.type = (std::abs(t.cornerRadius - (t.cuttingDiameter * 0.5)) < 1e-6)
+            ? ToolType::BallEndMill : ToolType::EndMill;
+        row.tool.diameter = t.cuttingDiameter;
+        row.tool.cornerRadius = t.cornerRadius;
+        row.tool.fluteLength = t.cuttingLength;
+        row.tool.overallLength = t.overallAssemblyLength;
+        row.tool.numFlutes = t.numberOfFlutes;
+        row.tool.rakeAngle = t.helixAngle;
+        row.tool.material = t.cuttingMaterial;
+        db.upsertTool(row);
+    }
+
+    for (const auto& d : m_cuttingData) {
+        SqlCuttingDataRow row;
+        row.toolKey               = d.catalogueNumber;
+        row.materialClass         = d.materialClass;
+        row.nominalDiameter       = d.nominalDiameter;
+        row.surfaceSpeedMin       = d.surfaceSpeedMin;
+        row.surfaceSpeedMax       = d.surfaceSpeedMax;
+        row.feedPerToothMin       = d.feedPerToothMin;
+        row.feedPerToothMax       = d.feedPerToothMax;
+        row.maxAxialDepth         = d.maxAxialDepth;
+        row.maxRadialDepth        = d.maxRadialDepth;
+        row.recommendedAxialDepth = d.recommendedAxialDepth;
+        row.recommendedRadialDepth= d.recommendedRadialDepth;
+        row.maxRadialEngagement   = d.maxRadialEngagement;
+        row.trochoidalLoopRadius  = d.trochoidalLoopRadius;
+        row.coolant               = d.recommendedCoolant;
+        row.optimisedForHSM       = d.optimisedForHSM;
+        row.optimisedForTrochoidal= d.optimisedForTrochoidal;
+        row.expectedToolLifeMin   = d.expectedToolLifeMin;
+        db.upsertCuttingData(row);
+    }
+
+    m_matLib.exportToSqlDatabase(db);
+}
+
+// --------------------------------------------------------------------------
+void CloudToolLibrary::importFromSqlDatabase(const SqlToolDatabase& db, bool replaceExisting) {
+    if (replaceExisting) {
+        m_tools.clear();
+        m_cuttingData.clear();
+    }
+
+    for (const auto& t : db.tools()) {
+        ToolDigitalTwin twin;
+        twin.catalogueNumber       = t.key;
+        twin.description           = t.tool.name;
+        twin.cuttingDiameter       = t.tool.diameter;
+        twin.cornerRadius          = t.tool.cornerRadius;
+        twin.cuttingLength         = t.tool.fluteLength;
+        twin.overallAssemblyLength = t.tool.overallLength;
+        twin.numberOfFlutes        = t.tool.numFlutes;
+        twin.helixAngle            = t.tool.rakeAngle;
+        twin.cuttingMaterial       = t.tool.material;
+        registerTool(std::move(twin));
+    }
+
+    for (const auto& c : db.cuttingData()) {
+        ManufacturerCuttingData d;
+        d.catalogueNumber         = c.toolKey;
+        d.materialClass           = c.materialClass;
+        d.nominalDiameter         = c.nominalDiameter;
+        d.surfaceSpeedMin         = c.surfaceSpeedMin;
+        d.surfaceSpeedMax         = c.surfaceSpeedMax;
+        d.feedPerToothMin         = c.feedPerToothMin;
+        d.feedPerToothMax         = c.feedPerToothMax;
+        d.maxAxialDepth           = c.maxAxialDepth;
+        d.maxRadialDepth          = c.maxRadialDepth;
+        d.recommendedAxialDepth   = c.recommendedAxialDepth;
+        d.recommendedRadialDepth  = c.recommendedRadialDepth;
+        d.maxRadialEngagement     = c.maxRadialEngagement;
+        d.trochoidalLoopRadius    = c.trochoidalLoopRadius;
+        d.recommendedCoolant      = c.coolant;
+        d.optimisedForHSM         = c.optimisedForHSM;
+        d.optimisedForTrochoidal  = c.optimisedForTrochoidal;
+        d.expectedToolLifeMin     = c.expectedToolLifeMin;
+        registerCuttingData(std::move(d));
+    }
 }

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(CAMExpert VERSION 1.2.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Windows-specific settings
@@ -19,6 +19,7 @@ set(SOURCES
     src/ui/Viewport3D.cpp
     src/ui/SelectionBar.cpp
     src/cad/Geometry.cpp
+    src/cad/ConstraintSolver.cpp
     src/cad/BRep.cpp
     src/cad/NurbsSurface.cpp
     src/cad/MeshData.cpp
@@ -38,6 +39,7 @@ set(SOURCES
     src/cam/MillTurn.cpp
     src/cam/SwissMachining.cpp
     src/cam/CloudToolLibrary.cpp
+    src/cam/SqlToolDatabase.cpp
     src/cam/DynamicPlane.cpp
     src/cam/TransformToolpath.cpp
     src/cam/ProbingCycles.cpp
@@ -70,6 +72,7 @@ set(HEADERS
     src/ui/Viewport3D.h
     src/ui/SelectionBar.h
     src/cad/Geometry.h
+    src/cad/ConstraintSolver.h
     src/cad/BRep.h
     src/cad/NurbsSurface.h
     src/cad/MeshData.h
@@ -89,6 +92,7 @@ set(HEADERS
     src/cam/MillTurn.h
     src/cam/SwissMachining.h
     src/cam/CloudToolLibrary.h
+    src/cam/SqlToolDatabase.h
     src/cam/DynamicPlane.h
     src/cam/TransformToolpath.h
     src/cam/ProbingCycles.h
@@ -151,6 +155,13 @@ if(MSVC)
     target_compile_definitions(CAMExpert PRIVATE _CRT_SECURE_NO_WARNINGS)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(CAMExpert PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# Optional OpenMP acceleration for 3D toolpath projection loops
+find_package(OpenMP QUIET)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(CAMExpert PRIVATE OpenMP::OpenMP_CXX)
+    target_compile_definitions(CAMExpert PRIVATE CAMEXPERT_USE_OPENMP=1)
 endif()
 
 # Install target

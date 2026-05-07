@@ -9,6 +9,7 @@
 #include <vector>
 #include <memory>
 #include <functional>
+#include <unordered_map>
 
 // Forward declaration
 class ToolpathManager;
@@ -140,6 +141,18 @@ public:
     const PostConfig& config() const { return m_cfg; }
     void setConfig(const PostConfig& c) { m_cfg = c; }
 
+    // Scriptable dialect profile loading.
+    // Format: key=value per line, '#' comments allowed.
+    // Example keys:
+    //   controller=Fanuc
+    //   decimal_places=4
+    //   tool_change_template=T{tool} M06 ({tool_name})
+    //   spindle_cw_template=S{rpm} M03
+    //   coolant_flood_on=M08
+    bool loadScriptProfile(const std::string& filePath, std::string* errorOut = nullptr);
+    void clearScriptProfile();
+    bool hasScriptProfile() const { return m_scriptEnabled; }
+
     // Last error from generate()
     const PostError& lastError() const { return m_lastError; }
     bool             hasError()  const { return m_lastError.isFatal(); }
@@ -202,7 +215,9 @@ private:
 
     PostConfig m_cfg;
     PostError  m_lastError;
+
+    bool m_scriptEnabled = false;
+    std::unordered_map<std::string, std::string> m_scriptVars;
 };
 
 #endif // POST_PROCESSOR_H
-
