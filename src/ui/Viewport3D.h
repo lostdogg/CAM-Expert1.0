@@ -77,6 +77,7 @@ private:
     bool initOpenGL();
     void cleanupOpenGL();
     void render();
+    void drawBackground();
     void drawGrid();
     void drawAxes();
     void drawStock();
