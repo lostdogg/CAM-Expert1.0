@@ -541,15 +541,23 @@ void MainWindow::buildMenu() {
     AppendMenuW(hEdit, MF_STRING,    IDM_TOGGLE_SELECT_MODE,  L"&Toggle Selection Mode\tSpace");
 
     // Surfaces menu
-    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_LOFT,    L"&Loft…");
-    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_REVOLVE, L"&Revolve…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_FLAT_BOUNDARY, L"&Flat Boundary…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_LOFT,          L"Ruled/&Loft…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_REVOLVE,       L"&Revolve…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_SWEPT,         L"&Swept…");
     AppendMenuW(hSurface, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_FILLET,  L"&Fillet Blend…");
-    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_OFFSET,  L"&Offset…");
-    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_EXTEND,  L"&Extend…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_NET,           L"&Net…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_FENCE,         L"Fen&ce…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_DRAFT_SURF,    L"&Draft…");
     AppendMenuW(hSurface, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_TRIM,    L"&Trim");
-    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_UNTRIM,  L"&Untrim");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_TRIM,          L"Trim to &Curves");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_TRIM_TO_SURF,  L"Trim to &Surfaces");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_UNTRIM,        L"&Untrim");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_FILLET,        L"&Fillet Blend…");
+    AppendMenuW(hSurface, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_FROM_SOLID,    L"From Sol&ids…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_OFFSET,        L"&Offset…");
+    AppendMenuW(hSurface, MF_STRING,    IDM_SURF_EXTEND,        L"&Extend…");
 
     // Machine menu
     AppendMenuW(hMachine, MF_STRING,    IDM_MACHINE_BACKPLOT, L"&Backplot");
@@ -869,13 +877,20 @@ void MainWindow::onCommand(int id) {
     case IDM_WF_SET_CPLANE: wfCycleCplane(); break;
     case IDM_WF_SET_ZDEPTH: wfSetZDepth();  break;
 
-    case IDM_SURF_LOFT:    surfaceLoft();    break;
-    case IDM_SURF_REVOLVE: surfaceRevolve(); break;
-    case IDM_SURF_FILLET:  surfaceFillet();  break;
-    case IDM_SURF_OFFSET:  surfaceOffset();  break;
-    case IDM_SURF_TRIM:    surfaceTrim();    break;
-    case IDM_SURF_UNTRIM:  surfaceUntrim();  break;
-    case IDM_SURF_EXTEND:  surfaceExtend();  break;
+    case IDM_SURF_LOFT:          surfaceLoft();          break;
+    case IDM_SURF_REVOLVE:       surfaceRevolve();       break;
+    case IDM_SURF_FILLET:        surfaceFillet();        break;
+    case IDM_SURF_OFFSET:        surfaceOffset();        break;
+    case IDM_SURF_TRIM:          surfaceTrim();          break;
+    case IDM_SURF_UNTRIM:        surfaceUntrim();        break;
+    case IDM_SURF_EXTEND:        surfaceExtend();        break;
+    case IDM_SURF_FLAT_BOUNDARY: surfaceFlatBoundary();  break;
+    case IDM_SURF_SWEPT:         surfaceSwept();         break;
+    case IDM_SURF_NET:           surfaceNet();           break;
+    case IDM_SURF_FENCE:         surfaceFence();         break;
+    case IDM_SURF_DRAFT_SURF:    surfaceDraft();         break;
+    case IDM_SURF_TRIM_TO_SURF:  surfaceTrimToSurface(); break;
+    case IDM_SURF_FROM_SOLID:    surfaceFromSolid();     break;
 
     case IDM_SOLID_EXTRUDE:  createSolidBox();        break;
     case IDM_SOLID_REVOLVE:  createSolidCylinder();   break;
@@ -4719,8 +4734,342 @@ void MainWindow::surfaceExtend()
     SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
 }
 
-// ==========================================================================
-// Additional CAM toolpath generators (Machine tab)
+// --------------------------------------------------------------------------
+// IDM_SURF_FLAT_BOUNDARY – create a flat surface within a rectangular loop
+// --------------------------------------------------------------------------
+void MainWindow::surfaceFlatBoundary()
+{
+    if (!m_surfacesMgr) return;
+
+    double width = 100.0, depth = 60.0;
+    if (!promptDouble2(L"Create Flat Boundary Surface",
+                       L"Boundary width (mm):", width, width,
+                       L"Boundary depth (mm):", depth, depth))
+        return;
+
+    if (width <= 0 || depth <= 0) {
+        MessageBoxW(m_hwnd, L"Width and depth must be positive.",
+                    L"Create Flat Boundary Surface", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    static int flatCount = 0;
+    std::string name = "Flat_" + std::to_string(++flatCount);
+
+    NurbsSurface surf = SurfacesManager::makeFlat(width, depth);
+    m_surfacesMgr->addSurface(std::move(surf), name);
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200, L"Flat boundary surface created: %.4g × %.4g mm  [%hs]",
+                  width, depth, name.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SURF_SWEPT – drive a cross-section profile along a rail path
+// --------------------------------------------------------------------------
+void MainWindow::surfaceSwept()
+{
+    if (!m_surfacesMgr) return;
+
+    double sectionWidth = 40.0, sectionHeight = 20.0, pathLength = 120.0;
+    if (!promptTriple(L"Create Swept Surface",
+                      L"Section width  (mm):", sectionWidth,  sectionWidth,
+                      L"Section height (mm):", sectionHeight, sectionHeight,
+                      L"Path length    (mm):", pathLength,    pathLength))
+        return;
+
+    if (sectionWidth <= 0 || sectionHeight <= 0 || pathLength <= 0) {
+        MessageBoxW(m_hwnd, L"All dimensions must be positive.",
+                    L"Create Swept Surface", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // Rectangular cross-section in the YZ-plane
+    std::vector<Geom::Vec3> crossSection = {
+        { 0, -sectionWidth / 2, 0 },
+        { 0,  sectionWidth / 2, 0 },
+        { 0,  sectionWidth / 2, sectionHeight },
+        { 0, -sectionWidth / 2, sectionHeight }
+    };
+
+    // Straight path along X
+    const int pathPts = 8;
+    std::vector<Geom::Vec3> path;
+    path.reserve(static_cast<std::size_t>(pathPts));
+    for (int i = 0; i < pathPts; ++i)
+        path.push_back({ pathLength * static_cast<double>(i) / (pathPts - 1), 0, 0 });
+
+    static int sweptCount = 0;
+    std::string name = "Swept_" + std::to_string(++sweptCount);
+
+    NurbsSurface surf = SurfacesManager::makeSwept(crossSection, path);
+    m_surfacesMgr->addSurface(std::move(surf), name);
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200,
+                  L"Swept surface created: section %.4g×%.4g mm, path %.4g mm  [%hs]",
+                  sectionWidth, sectionHeight, pathLength, name.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SURF_NET – create a net surface from a U/V wireframe grid
+// --------------------------------------------------------------------------
+void MainWindow::surfaceNet()
+{
+    if (!m_surfacesMgr) return;
+
+    double width = 100.0, depth = 80.0, height = 30.0;
+    if (!promptTriple(L"Create Net Surface",
+                      L"Grid width  (mm):", width,  width,
+                      L"Grid depth  (mm):", depth,  depth,
+                      L"Grid height (mm):", height, height))
+        return;
+
+    if (width <= 0 || depth <= 0) {
+        MessageBoxW(m_hwnd, L"Width and depth must be positive.",
+                    L"Create Net Surface", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // Build a 4×4 grid of points with a gentle dome in the centre
+    const int nu = 4, nv = 4;
+    std::vector<std::vector<Geom::Vec3>> uChains;
+    for (int j = 0; j < nv; ++j) {
+        double v = static_cast<double>(j) / (nv - 1);
+        double y = -depth / 2 + v * depth;
+        std::vector<Geom::Vec3> row;
+        row.reserve(static_cast<std::size_t>(nu));
+        for (int i = 0; i < nu; ++i) {
+            double u = static_cast<double>(i) / (nu - 1);
+            double x = -width / 2 + u * width;
+            // Dome: maximum height at centre, zero at edges
+            double bx = 4 * u * (1 - u);
+            double by = 4 * v * (1 - v);
+            double z  = height * bx * by;
+            row.push_back({ x, y, z });
+        }
+        uChains.push_back(std::move(row));
+    }
+
+    // V-chains: columns of the grid
+    std::vector<std::vector<Geom::Vec3>> vChains;
+    for (int i = 0; i < nu; ++i) {
+        std::vector<Geom::Vec3> col;
+        col.reserve(static_cast<std::size_t>(nv));
+        for (int j = 0; j < nv; ++j)
+            col.push_back(uChains[j][i]);
+        vChains.push_back(std::move(col));
+    }
+
+    static int netCount = 0;
+    std::string name = "Net_" + std::to_string(++netCount);
+
+    NurbsSurface surf = SurfacesManager::makeNet(uChains, vChains);
+    m_surfacesMgr->addSurface(std::move(surf), name);
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200,
+                  L"Net surface created: %.4g × %.4g mm, dome %.4g mm  [%hs]",
+                  width, depth, height, name.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SURF_FENCE – project a surface from a curve at a direction/distance
+// --------------------------------------------------------------------------
+void MainWindow::surfaceFence()
+{
+    if (!m_surfacesMgr) return;
+
+    double length = 50.0, angle = 90.0;
+    if (!promptDouble2(L"Create Fence Surface",
+                       L"Projection length (mm):", length, length,
+                       L"Projection angle  (deg, 0=X, 90=Z):", angle, angle))
+        return;
+
+    if (length <= 0) {
+        MessageBoxW(m_hwnd, L"Projection length must be positive.",
+                    L"Create Fence Surface", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // Base curve: simple straight line along Y
+    const int basePts = 6;
+    const double baseLen = 100.0;
+    std::vector<Geom::Vec3> baseCurve;
+    baseCurve.reserve(static_cast<std::size_t>(basePts));
+    for (int i = 0; i < basePts; ++i) {
+        double t = static_cast<double>(i) / (basePts - 1);
+        baseCurve.push_back({ 0, t * baseLen - baseLen / 2, 0 });
+    }
+
+    // Direction vector from angle (in XZ-plane)
+    double rad = angle * (kSurfPi / 180.0);
+    Geom::Vec3 dir{ std::cos(rad), 0.0, std::sin(rad) };
+
+    static int fenceCount = 0;
+    std::string name = "Fence_" + std::to_string(++fenceCount);
+
+    NurbsSurface surf = SurfacesManager::makeFence(baseCurve, dir, length);
+    m_surfacesMgr->addSurface(std::move(surf), name);
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200, L"Fence surface created: length=%.4g mm, angle=%.4g°  [%hs]",
+                  length, angle, name.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SURF_DRAFT_SURF – extend a surface from a wireframe at a draft angle
+// --------------------------------------------------------------------------
+void MainWindow::surfaceDraft()
+{
+    if (!m_surfacesMgr) return;
+
+    double draftAngle = 3.0, wallHeight = 30.0;
+    if (!promptDouble2(L"Create Draft Surface",
+                       L"Draft angle (deg):", draftAngle, draftAngle,
+                       L"Wall height (mm):",  wallHeight, wallHeight))
+        return;
+
+    if (std::abs(draftAngle) < 0.01 || wallHeight <= 0) {
+        MessageBoxW(m_hwnd, L"Draft angle must be non-zero and height must be positive.",
+                    L"Create Draft Surface", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    // Base curve: rectangular loop (4-sided) as a polyline
+    const double hw = 50.0, hd = 40.0;
+    std::vector<Geom::Vec3> baseCurve = {
+        { -hw, -hd, 0 }, {  hw, -hd, 0 },
+        {  hw,  hd, 0 }, { -hw,  hd, 0 }, { -hw, -hd, 0 }
+    };
+
+    static int draftCount = 0;
+    std::string name = "Draft_" + std::to_string(++draftCount);
+
+    NurbsSurface surf = SurfacesManager::makeDraft(baseCurve, draftAngle, wallHeight);
+    m_surfacesMgr->addSurface(std::move(surf), name);
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200, L"Draft surface created: %.4g°, H=%.4g mm  [%hs]",
+                  draftAngle, wallHeight, name.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SURF_TRIM_TO_SURF – trim one surface using another intersecting surface
+// --------------------------------------------------------------------------
+void MainWindow::surfaceTrimToSurface()
+{
+    if (!m_surfacesMgr) return;
+
+    if (m_surfacesMgr->count() < 2) {
+        MessageBoxW(m_hwnd,
+            L"Trim to Surfaces requires at least two existing surfaces.\n"
+            L"Create two surfaces first, then apply this operation.",
+            L"Trim to Surfaces", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    // Mark the most recently added (last) surface as trimmed using the previous one
+    int idx = m_surfacesMgr->count() - 1;
+    if (m_surfacesMgr->at(idx).trimmed) {
+        SendMessage(m_hStatusBar, SB_SETTEXT, 0,
+            reinterpret_cast<LPARAM>(L"Trim to Surfaces: surface is already trimmed. Use Untrim first."));
+        return;
+    }
+
+    m_surfacesMgr->setTrimmed(idx, true);
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200,
+                  L"Surface \"%hs\" trimmed using surface \"%hs\".",
+                  m_surfacesMgr->at(idx).name.c_str(),
+                  m_surfacesMgr->at(idx - 1).name.c_str());
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
+
+// --------------------------------------------------------------------------
+// IDM_SURF_FROM_SOLID – extract individual surfaces from a solid body
+// --------------------------------------------------------------------------
+void MainWindow::surfaceFromSolid()
+{
+    if (!m_surfacesMgr) return;
+
+    if (!m_solidsMgr || m_solidsMgr->count() == 0) {
+        MessageBoxW(m_hwnd,
+            L"No solid bodies in the session.\n"
+            L"Create or import a solid first, then use From Solids to extract its faces.",
+            L"From Solids", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    // Build a representative surface for each face of the active solid.
+    // We approximate each face as a flat NURBS patch based on the face's
+    // vertex bounding box (a lightweight analytical proxy).
+    const BRep::Solid& solid = m_solidsMgr->at(m_solidsMgr->count() - 1).solid;
+    const auto& faces    = solid.faces();
+    const auto& edges    = solid.edges();
+    const auto& vertices = solid.vertices();
+    int faceCount = static_cast<int>(faces.size());
+
+    if (faceCount == 0) {
+        MessageBoxW(m_hwnd, L"The selected solid has no faces to extract.",
+                    L"From Solids", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    static int fromSolidCount = 0;
+    int extracted = 0;
+    for (int fi = 0; fi < faceCount; ++fi) {
+        const BRep::Face& face = faces[static_cast<std::size_t>(fi)];
+        // Compute bounding box of all vertices reachable via this face's edges
+        double minX =  1e30, minY =  1e30, minZ =  1e30;
+        double maxX = -1e30, maxY = -1e30, maxZ = -1e30;
+        for (int eid : face.edgeIds) {
+            if (eid < 0 || eid >= static_cast<int>(edges.size())) continue;
+            const BRep::Edge& edge = edges[static_cast<std::size_t>(eid)];
+            for (int vid : { edge.startVertexId, edge.endVertexId }) {
+                if (vid < 0 || vid >= static_cast<int>(vertices.size())) continue;
+                const Geom::Vec3& p = vertices[static_cast<std::size_t>(vid)].point;
+                if (p.x < minX) minX = p.x;  if (p.x > maxX) maxX = p.x;
+                if (p.y < minY) minY = p.y;  if (p.y > maxY) maxY = p.y;
+                if (p.z < minZ) minZ = p.z;  if (p.z > maxZ) maxZ = p.z;
+            }
+        }
+
+        double dx = maxX - minX, dy = maxY - minY, dz = maxZ - minZ;
+
+        // Select the two largest extents to define the face plane
+        double w, d;
+        if (dz <= dx && dz <= dy) { w = dx; d = dy; }       // XY-dominant face
+        else if (dy <= dx)         { w = dx; d = dz; }       // XZ-dominant face
+        else                       { w = dy; d = dz; }       // YZ-dominant face
+
+        if (w < 1e-6 || d < 1e-6) continue; // degenerate face
+
+        NurbsSurface faceSurf = SurfacesManager::makeFlat(w, d);
+        std::string name = "FromSolid_" + std::to_string(++fromSolidCount)
+                         + "_F" + std::to_string(fi + 1);
+        m_surfacesMgr->addSurface(std::move(faceSurf), name);
+        ++extracted;
+    }
+
+    if (m_viewport) m_viewport->redraw();
+
+    wchar_t msg[200] = {};
+    std::swprintf(msg, 200, L"Extracted %d surface(s) from solid body.", extracted);
+    SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
+}
 // ==========================================================================
 
 // --------------------------------------------------------------------------

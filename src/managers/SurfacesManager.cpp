@@ -384,3 +384,178 @@ NurbsSurface SurfacesManager::makeFillet(const NurbsSurface& srf1,
 
     return NurbsSurface(2, vDeg, knotsU, knotsV, cp, wt);
 }
+
+// --------------------------------------------------------------------------
+// makeFlat – flat bilinear surface of `width` × `depth` centred at the origin
+//
+// A bilinear NURBS (degree 1 in both directions) with four corner control points
+// lying in the XY-plane.  This represents the simplest "Flat Boundary" surface.
+// --------------------------------------------------------------------------
+NurbsSurface SurfacesManager::makeFlat(double width, double depth)
+{
+    double hw = width * 0.5;
+    double hd = depth * 0.5;
+
+    // 2 × 2 control point grid, degree 1 in both directions
+    std::vector<std::vector<Geom::Vec3>> cp = {
+        { {-hw, -hd, 0.0}, {-hw,  hd, 0.0} },
+        { { hw, -hd, 0.0}, { hw,  hd, 0.0} }
+    };
+
+    std::vector<double> knots = { 0.0, 0.0, 1.0, 1.0 };
+    return NurbsSurface(1, 1, knots, knots, cp);
+}
+
+// --------------------------------------------------------------------------
+// makeSwept – sweep a cross-section profile along a polyline path
+//
+// At each path vertex the cross-section is translated so that its centroid
+// coincides with the path point.  The resulting loft through all translated
+// sections produces a swept surface.
+// --------------------------------------------------------------------------
+NurbsSurface SurfacesManager::makeSwept(
+        const std::vector<Geom::Vec3>& crossSection,
+        const std::vector<Geom::Vec3>& path)
+{
+    if (crossSection.size() < 2)
+        throw std::invalid_argument("makeSwept: cross-section needs at least 2 points");
+    if (path.size() < 2)
+        throw std::invalid_argument("makeSwept: path needs at least 2 points");
+
+    // Compute cross-section centroid
+    Geom::Vec3 centroid{0, 0, 0};
+    for (const auto& p : crossSection) {
+        centroid.x += p.x;
+        centroid.y += p.y;
+        centroid.z += p.z;
+    }
+    double inv = 1.0 / static_cast<double>(crossSection.size());
+    centroid.x *= inv;
+    centroid.y *= inv;
+    centroid.z *= inv;
+
+    // Build sections: translate cross-section to each path point
+    std::vector<std::vector<Geom::Vec3>> sections;
+    sections.reserve(path.size());
+    for (const auto& pathPt : path) {
+        Geom::Vec3 offset{ pathPt.x - centroid.x,
+                           pathPt.y - centroid.y,
+                           pathPt.z - centroid.z };
+        std::vector<Geom::Vec3> sec;
+        sec.reserve(crossSection.size());
+        for (const auto& p : crossSection)
+            sec.push_back({ p.x + offset.x, p.y + offset.y, p.z + offset.z });
+        sections.push_back(std::move(sec));
+    }
+
+    return makeLoft(sections);
+}
+
+// --------------------------------------------------------------------------
+// makeNet – net surface from a grid of U-chains and V-chains
+//
+// uChains: profiles running in the U direction (must all have the same
+//          point count, which becomes the V control-point count).
+// vChains: profiles running in the V direction (count = U control-point count).
+//
+// The surface is constructed by using each uChain row as a loft section so
+// that the resulting NURBS interpolates all U-chain polylines.
+// --------------------------------------------------------------------------
+NurbsSurface SurfacesManager::makeNet(
+        const std::vector<std::vector<Geom::Vec3>>& uChains,
+        const std::vector<std::vector<Geom::Vec3>>& vChains)
+{
+    if (uChains.size() < 2)
+        throw std::invalid_argument("makeNet: need at least 2 U-chains");
+    if (vChains.size() < 2)
+        throw std::invalid_argument("makeNet: need at least 2 V-chains");
+
+    // Each U-chain's point count equals the number of V-chains (grid columns)
+    std::size_t ptPerChain = vChains.size();
+    for (const auto& ch : uChains) {
+        if (ch.size() != ptPerChain)
+            throw std::invalid_argument(
+                "makeNet: each U-chain must have exactly as many points as there are V-chains");
+    }
+
+    // Use U-chains directly as loft sections
+    return makeLoft(uChains);
+}
+
+// --------------------------------------------------------------------------
+// makeFence – extrude a base curve in a given direction by `length`
+//
+// This creates a ruled surface between the base curve and a copy of it
+// translated by direction * length.
+// --------------------------------------------------------------------------
+NurbsSurface SurfacesManager::makeFence(
+        const std::vector<Geom::Vec3>& baseCurve,
+        const Geom::Vec3& direction,
+        double length)
+{
+    if (baseCurve.size() < 2)
+        throw std::invalid_argument("makeFence: base curve needs at least 2 points");
+
+    // Normalise direction
+    double mag = std::sqrt(direction.x * direction.x +
+                           direction.y * direction.y +
+                           direction.z * direction.z);
+    if (mag < 1e-12)
+        throw std::invalid_argument("makeFence: direction vector must be non-zero");
+
+    double scale = length / mag;
+    Geom::Vec3 d{ direction.x * scale, direction.y * scale, direction.z * scale };
+
+    // Offset copy of base curve
+    std::vector<Geom::Vec3> topCurve;
+    topCurve.reserve(baseCurve.size());
+    for (const auto& p : baseCurve)
+        topCurve.push_back({ p.x + d.x, p.y + d.y, p.z + d.z });
+
+    // Ruled loft between base and offset curves
+    return makeLoft({ baseCurve, topCurve });
+}
+
+// --------------------------------------------------------------------------
+// makeDraft – extrude a base curve upward at a draft angle
+//
+// The wall leans outward (away from each point's XY centroid) by
+// `draftAngleDeg` from the vertical as it rises to `height` mm.
+// --------------------------------------------------------------------------
+NurbsSurface SurfacesManager::makeDraft(
+        const std::vector<Geom::Vec3>& baseCurve,
+        double draftAngleDeg,
+        double height)
+{
+    if (baseCurve.size() < 2)
+        throw std::invalid_argument("makeDraft: base curve needs at least 2 points");
+    if (std::abs(height) < 1e-12)
+        throw std::invalid_argument("makeDraft: height must be non-zero");
+
+    // Compute XY centroid of the base curve to determine outward direction
+    double cx = 0.0, cy = 0.0;
+    for (const auto& p : baseCurve) { cx += p.x; cy += p.y; }
+    double inv = 1.0 / static_cast<double>(baseCurve.size());
+    cx *= inv;  cy *= inv;
+
+    // Draft offset: at height H, each point moves outward by H * tan(angle)
+    double tanAngle = std::tan(draftAngleDeg * (3.14159265358979323846 / 180.0));
+    double lateralOffset = height * tanAngle;
+
+    std::vector<Geom::Vec3> topCurve;
+    topCurve.reserve(baseCurve.size());
+    for (const auto& p : baseCurve) {
+        // Outward unit vector in XY
+        double ox = p.x - cx;
+        double oy = p.y - cy;
+        double len = std::sqrt(ox * ox + oy * oy);
+        if (len > 1e-12) { ox /= len; oy /= len; }
+        topCurve.push_back({
+            p.x + ox * lateralOffset,
+            p.y + oy * lateralOffset,
+            p.z + height
+        });
+    }
+
+    return makeLoft({ baseCurve, topCurve });
+}
