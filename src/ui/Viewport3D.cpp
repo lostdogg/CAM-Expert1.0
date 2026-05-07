@@ -891,12 +891,27 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         m_rightDown  = true;
         m_lastMouseX = LOWORD(lParam);
         m_lastMouseY = HIWORD(lParam);
+        m_rightClickStartX = m_lastMouseX;
+        m_rightClickStartY = m_lastMouseY;
         SetCapture(m_hwnd);
         return 0;
-    case WM_RBUTTONUP:
+    case WM_RBUTTONUP: {
         m_rightDown = false;
         ReleaseCapture();
+        // Distinguish a click (no significant drag) from a pan gesture.
+        // If movement was less than 5 px in either axis, treat as a click
+        // and fire the context menu callback.
+        int dxCtx = LOWORD(lParam) - m_rightClickStartX;
+        int dyCtx = HIWORD(lParam) - m_rightClickStartY;
+        static constexpr int kContextMenuThreshold = 5;
+        if (m_contextMenuCb &&
+            dxCtx * dxCtx + dyCtx * dyCtx <= kContextMenuThreshold * kContextMenuThreshold) {
+            POINT pt = { LOWORD(lParam), HIWORD(lParam) };
+            ClientToScreen(m_hwnd, &pt);
+            m_contextMenuCb(pt.x, pt.y);
+        }
         return 0;
+    }
     case WM_MOUSEMOVE: {
         int x = LOWORD(lParam), y = HIWORD(lParam);
         int dx = x - m_lastMouseX, dy = y - m_lastMouseY;
@@ -918,6 +933,44 @@ LRESULT Viewport3D::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             redraw();
         }
         m_lastMouseX = x; m_lastMouseY = y;
+
+        // Fire live-coordinate callback: unproject screen point to world space
+        // and intersect the resulting ray with the Z=0 construction plane.
+        if (m_coordCb && m_hGLRC) {
+            wglMakeCurrent(m_hDC, m_hGLRC);
+
+            GLint    viewport[4]  = {};
+            GLdouble modelview[16]  = {};
+            GLdouble projection[16] = {};
+            glGetIntegerv(GL_VIEWPORT,        viewport);
+            glGetDoublev (GL_MODELVIEW_MATRIX,  modelview);
+            glGetDoublev (GL_PROJECTION_MATRIX, projection);
+
+            // Flip Y: OpenGL origin is at bottom-left, Windows at top-left
+            GLdouble winX = static_cast<GLdouble>(x);
+            GLdouble winY = static_cast<GLdouble>(viewport[3] - y);
+
+            GLdouble wx0, wy0, wz0;  // near-plane intersection
+            GLdouble wx1, wy1, wz1;  // far-plane intersection
+            gluUnProject(winX, winY, 0.0, modelview, projection, viewport,
+                         &wx0, &wy0, &wz0);
+            gluUnProject(winX, winY, 1.0, modelview, projection, viewport,
+                         &wx1, &wy1, &wz1);
+
+            // Ray–plane intersection: find t where z == 0
+            double dz = wz1 - wz0;
+            double wx, wy, wz;
+            if (std::abs(dz) > 1e-10) {
+                double t = -wz0 / dz;
+                wx = wx0 + t * (wx1 - wx0);
+                wy = wy0 + t * (wy1 - wy0);
+                wz = 0.0;
+            } else {
+                // Ray is parallel to z=0; report near-plane point
+                wx = wx0; wy = wy0; wz = wz0;
+            }
+            m_coordCb(wx, wy, wz);
+        }
         return 0;
     }
     case WM_MOUSEWHEEL: {

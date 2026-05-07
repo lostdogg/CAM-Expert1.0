@@ -63,11 +63,11 @@ public:
 private:
     void build();
     void buildHomeTab();
-    void buildWireframeTab();
-    void buildSurfacesTab();
-    void buildSolidsTab();
-    void buildModelPrepTab();
-    void buildMachineTab();
+    void buildWireframeTab();       // "Geometry & Wireframe"
+    void buildSurfacesSolidsTab();  // "Surfaces & Solids" (merged)
+    void buildModelPrepTab();       // "Preparation"
+    void buildToolpathTab();        // "Toolpath Generation"
+    void buildMachineControlTab();  // "Machine Control"
     void buildViewTab();
     void buildCopilotTab();
 

@@ -357,16 +357,16 @@ void MainWindow::onCreate() {
         0, RIBBON_HEIGHT, MANAGERS_PANEL_WIDTH, 600,
         m_hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_MANAGERS_PANEL)), hInst, nullptr);
 
-    // Add tabs to the managers panel
+    // Add tabs to the managers panel in spec order: Toolpaths, Levels, Planes, Solids
     TCITEMW ti{};
     ti.mask    = TCIF_TEXT;
     ti.pszText = const_cast<wchar_t*>(L"Toolpaths");
     TabCtrl_InsertItem(m_hManagersPanel, 0, &ti);
-    ti.pszText = const_cast<wchar_t*>(L"Solids");
-    TabCtrl_InsertItem(m_hManagersPanel, 1, &ti);
     ti.pszText = const_cast<wchar_t*>(L"Levels");
-    TabCtrl_InsertItem(m_hManagersPanel, 2, &ti);
+    TabCtrl_InsertItem(m_hManagersPanel, 1, &ti);
     ti.pszText = const_cast<wchar_t*>(L"Planes");
+    TabCtrl_InsertItem(m_hManagersPanel, 2, &ti);
+    ti.pszText = const_cast<wchar_t*>(L"Solids");
     TabCtrl_InsertItem(m_hManagersPanel, 3, &ti);
 
     // --- Solids history-tree (lives inside the managers panel, Solids tab) ---
@@ -487,6 +487,18 @@ void MainWindow::onCreate() {
     m_wfScene->setOnEntityChanged([this](int entityIndex) {
         onWireframeEntityAdded(entityIndex);
     });
+
+    // Wire viewport coordinate callback → live X/Y/Z readout in status bar
+    if (m_viewport) {
+        m_viewport->setCoordCallback([this](double x, double y, double z) {
+            updateCoordinateDisplay(x, y, z);
+        });
+
+        // Wire right-click context menu callback
+        m_viewport->setContextMenuCallback([this](int screenX, int screenY) {
+            showViewportContextMenu(screenX, screenY);
+        });
+    }
 }
 
 // --------------------------------------------------------------------------
@@ -661,22 +673,29 @@ void MainWindow::onSize(int cx, int cy) {
 void MainWindow::updateLayout(int cx, int cy) {
     if (!m_hwnd) return;
 
-    // Status bar – auto-sizes itself, then we partition it into 4 panes.
+    // Status bar – auto-sizes itself, then we partition it into 8 panes.
     if (m_hStatusBar) {
         SendMessage(m_hStatusBar, WM_SIZE, 0, 0);
         // Fixed-width panes at the right end; pane 0 fills the remainder.
-        int snapW   = 100;
-        int zdepW   = 110;
+        int unitW   = 50;
+        int coordW  = 80;
+        int snapW   = 80;
+        int zdepW   = 80;
         int cplaneW = 90;
-        int parts[4] = {
-            cx - cplaneW - zdepW - snapW,   // pane 0: message
-            cx - zdepW   - snapW,           // pane 1: Cplane
-            cx - snapW,                     // pane 2: Z-depth
-            -1                              // pane 3: Snap (fills to end)
+        int parts[8] = {
+            cx - cplaneW - zdepW - snapW - coordW*3 - unitW,  // pane 0: message
+            cx - zdepW   - snapW - coordW*3 - unitW,           // pane 1: Cplane
+            cx - snapW   - coordW*3 - unitW,                   // pane 2: Z-depth
+            cx - coordW*3 - unitW,                             // pane 3: Snap
+            cx - coordW*2 - unitW,                             // pane 4: X coord
+            cx - coordW   - unitW,                             // pane 5: Y coord
+            cx - unitW,                                        // pane 6: Z coord
+            -1                                                 // pane 7: Unit (fills to end)
         };
-        SendMessage(m_hStatusBar, SB_SETPARTS, 4,
+        SendMessage(m_hStatusBar, SB_SETPARTS, 8,
                     reinterpret_cast<LPARAM>(parts));
         updateWfStatusBar();
+        updateUnitPane();
     }
 
     int viewY  = RIBBON_HEIGHT;
@@ -685,10 +704,15 @@ void MainWindow::updateLayout(int cx, int cy) {
     // If the Copilot panel is visible, carve out space on the right side
     int copilotW = (m_copilotVisible && m_copilotPanel) ? COPILOT_PANEL_WIDTH : 0;
 
-    // Selection bar sits on the right edge, to the left of the Copilot panel
-    int selBarX = cx - SELECTION_BAR_WIDTH - copilotW;
+    // Selection bar – horizontal strip anchored directly above the 3D canvas
+    int selBarX = MANAGERS_PANEL_WIDTH;
+    int selBarW = cx - MANAGERS_PANEL_WIDTH - copilotW;
+
+    // Viewport starts below the selection bar
+    int viewContentY = viewY + SELECTION_BAR_HEIGHT;
+    int viewContentH = viewH - SELECTION_BAR_HEIGHT;
     int viewX   = MANAGERS_PANEL_WIDTH;
-    int viewW   = cx - MANAGERS_PANEL_WIDTH - SELECTION_BAR_WIDTH - copilotW;
+    int viewW   = cx - MANAGERS_PANEL_WIDTH - copilotW;
 
     // Managers panel
     if (m_hManagersPanel)
@@ -697,14 +721,14 @@ void MainWindow::updateLayout(int cx, int cy) {
                      SWP_NOZORDER | SWP_NOACTIVATE);
 
     // Solids history-tree – sits inside the managers panel below the tab strip.
-    // The tree is shown only when the "Solids" tab (index 1) is active.
+    // The tree is shown only when the "Solids" tab (index 3) is active.
     if (m_hSolidsTree) {
         int tabHeight = 24; // approximate tab-strip height in pixels
         int treeY     = viewY + tabHeight;
         int treeH     = viewH - tabHeight;
         int activeSolidsTab = m_hManagersPanel
             ? TabCtrl_GetCurSel(m_hManagersPanel) : -1;
-        bool solidsTabActive = (activeSolidsTab == 1);
+        bool solidsTabActive = (activeSolidsTab == 3);
         SetWindowPos(m_hSolidsTree, nullptr,
                      0, treeY, MANAGERS_PANEL_WIDTH, treeH,
                      SWP_NOZORDER | SWP_NOACTIVATE);
@@ -715,13 +739,13 @@ void MainWindow::updateLayout(int cx, int cy) {
     if (m_ribbon)
         m_ribbon->resize(0, 0, cx, RIBBON_HEIGHT);
 
-    // Viewport
-    if (m_viewport)
-        m_viewport->resize(viewX, viewY, viewW, viewH);
-
-    // Selection bar (right edge of the viewport area)
+    // Selection bar – horizontal bar above the 3D canvas
     if (m_selectionBar)
-        m_selectionBar->resize(selBarX, viewY, SELECTION_BAR_WIDTH, viewH);
+        m_selectionBar->resize(selBarX, viewY, selBarW, SELECTION_BAR_HEIGHT);
+
+    // Viewport – positioned below the selection bar
+    if (m_viewport)
+        m_viewport->resize(viewX, viewContentY, viewW, viewContentH);
 
     // Copilot panel (far right, full height below ribbon)
     if (m_copilotPanel && m_copilotVisible)
@@ -945,6 +969,32 @@ void MainWindow::onCommand(int id) {
     case IDM_TOOLPATH_MGR_TOGGLE:  toolpathMgrToggle();   break;
     case IDM_TOOLPATH_TOGGLE_DISP: toolpathToggleDisplay(); break;
     case IDM_TOOLPATH_COPY_PARAMS: toolpathCopyParams();   break;
+
+    // Unit toggle
+    case IDM_UNIT_TOGGLE:          unitToggle();           break;
+
+    // Viewport context menu commands
+    case IDM_CTX_FIT:
+        if (m_viewport) { m_viewport->reset(); }
+        break;
+    case IDM_CTX_ISO:
+        if (m_viewport) m_viewport->setView(ViewPreset::Isometric);
+        break;
+    case IDM_CTX_FRONT:
+        if (m_viewport) m_viewport->setView(ViewPreset::Front);
+        break;
+    case IDM_CTX_TOP:
+        if (m_viewport) m_viewport->setView(ViewPreset::Top);
+        break;
+    case IDM_CTX_RIGHT:
+        if (m_viewport) m_viewport->setView(ViewPreset::Right);
+        break;
+    case IDM_CTX_CLEAR_COLORS:
+        // Reset all entity colours to defaults by clearing and redrawing the scene
+        if (m_viewport) m_viewport->redraw();
+        SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
+                    reinterpret_cast<LPARAM>(L"Colors cleared."));
+        break;
 
     default:
         // Forward only Copilot-panel command IDs to avoid interfering
@@ -3504,6 +3554,71 @@ void MainWindow::updateWfStatusBar() {
     // Pane 3: Snap placeholder (filled in by AutoCursor on hover)
     SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_SNAP,
                 reinterpret_cast<LPARAM>(L"Snap: –"));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::updateUnitPane() {
+    if (!m_hStatusBar) return;
+    SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_UNIT,
+                reinterpret_cast<LPARAM>(m_useMetric ? L"mm" : L"in"));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::updateCoordinateDisplay(double x, double y, double z) {
+    if (!m_hStatusBar) return;
+
+    // Convert from mm to inches when in imperial mode
+    static constexpr double kMmPerInch = 25.4;
+    double displayX = m_useMetric ? x : x / kMmPerInch;
+    double displayY = m_useMetric ? y : y / kMmPerInch;
+    double displayZ = m_useMetric ? z : z / kMmPerInch;
+
+    wchar_t xTxt[24] = {}, yTxt[24] = {}, zTxt[24] = {};
+    std::swprintf(xTxt, 24, L"X: %.3f", displayX);
+    std::swprintf(yTxt, 24, L"Y: %.3f", displayY);
+    std::swprintf(zTxt, 24, L"Z: %.3f", displayZ);
+
+    SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_COORD_X,
+                reinterpret_cast<LPARAM>(xTxt));
+    SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_COORD_Y,
+                reinterpret_cast<LPARAM>(yTxt));
+    SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_COORD_Z,
+                reinterpret_cast<LPARAM>(zTxt));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::unitToggle() {
+    m_useMetric = !m_useMetric;
+    updateUnitPane();
+    SendMessage(m_hStatusBar, SB_SETTEXT, SB_PANE_MSG,
+                reinterpret_cast<LPARAM>(m_useMetric
+                    ? L"Units: Metric (mm)" : L"Units: Imperial (inches)"));
+}
+
+// --------------------------------------------------------------------------
+void MainWindow::showViewportContextMenu(int screenX, int screenY) {
+    HMENU hMenu = CreatePopupMenu();
+    AppendMenuW(hMenu, MF_STRING, IDM_CTX_FIT,   L"Fit to Screen\tF3");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hMenu, MF_STRING, IDM_CTX_ISO,   L"Isometric View");
+    AppendMenuW(hMenu, MF_STRING, IDM_CTX_FRONT, L"Front View");
+    AppendMenuW(hMenu, MF_STRING, IDM_CTX_TOP,   L"Top View");
+    AppendMenuW(hMenu, MF_STRING, IDM_CTX_RIGHT, L"Right View");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hMenu, MF_STRING, IDM_VIEW_WIREFRAME, L"Wireframe");
+    AppendMenuW(hMenu, MF_STRING, IDM_VIEW_SHADED,    L"Shaded");
+    AppendMenuW(hMenu, MF_STRING, IDM_VIEW_TRANSLU,   L"Translucent");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hMenu, MF_STRING, IDM_CTX_CLEAR_COLORS, L"Clear Colors");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hMenu, MF_STRING, IDM_UNIT_TOGGLE,
+                m_useMetric ? L"Switch to Imperial (in)" : L"Switch to Metric (mm)");
+
+    TrackPopupMenuEx(hMenu,
+        TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON,
+        screenX, screenY,
+        m_hwnd, nullptr);
+    DestroyMenu(hMenu);
 }
 
 // --------------------------------------------------------------------------

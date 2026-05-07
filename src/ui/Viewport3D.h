@@ -7,6 +7,7 @@
 #include "../cad/WireframeScene.h"
 #include "../cam/Toolpath.h"
 #include <vector>
+#include <functional>
 
 // Forward declaration so we don't pull in manager headers everywhere
 class ToolpathManager;
@@ -69,6 +70,16 @@ public:
     bool       gnomonVisible() const { return m_showGnomon; }
     HWND hwnd() const { return m_hwnd; }
 
+    // Callback fired on WM_MOUSEMOVE with the cursor's estimated world-space
+    // position projected onto the Z=0 construction plane.
+    using CoordCallback = std::function<void(double x, double y, double z)>;
+    void setCoordCallback(CoordCallback cb) { m_coordCb = std::move(cb); }
+
+    // Callback fired when the user right-clicks without dragging, passing
+    // screen coordinates so the caller can show a context menu.
+    using ContextMenuCallback = std::function<void(int screenX, int screenY)>;
+    void setContextMenuCallback(ContextMenuCallback cb) { m_contextMenuCb = std::move(cb); }
+
 private:
     static LRESULT CALLBACK ViewportProc(HWND hwnd, UINT msg,
                                           WPARAM wParam, LPARAM lParam);
@@ -103,6 +114,7 @@ private:
     bool  m_midDown   = false;
     bool  m_rightDown = false;
     int   m_lastMouseX = 0, m_lastMouseY = 0;
+    int   m_rightClickStartX = 0, m_rightClickStartY = 0;  // for context-menu drag detection
 
     // Spin inertia (applied via WM_TIMER after a fast left-drag or wheel rotation)
     float       m_spinVelX      = 0.0f;
@@ -122,6 +134,9 @@ private:
     const SolidsManager*   m_solidsMgr   = nullptr;  // non-owning
     const SurfacesManager* m_surfacesMgr = nullptr;  // non-owning
     const WireframeScene*  m_wfScene     = nullptr;  // non-owning
+
+    CoordCallback       m_coordCb;        // cursor world-space position callback
+    ContextMenuCallback m_contextMenuCb;  // right-click context menu callback
 
     static constexpr const wchar_t* CLASS_NAME = L"CAMExpertViewport";
 };

@@ -51,10 +51,10 @@ void RibbonUI::resize(int x, int y, int width, int height) {
 void RibbonUI::build() {
     buildHomeTab();
     buildWireframeTab();
-    buildSurfacesTab();
-    buildSolidsTab();
+    buildSurfacesSolidsTab();
     buildModelPrepTab();
-    buildMachineTab();
+    buildToolpathTab();
+    buildMachineControlTab();
     buildViewTab();
     buildCopilotTab();
     repositionToolbars();
@@ -96,7 +96,7 @@ void RibbonUI::buildHomeTab() {
 
 void RibbonUI::buildWireframeTab() {
     RibbonTab tab;
-    tab.name = "Wireframe";
+    tab.name = "Geometry & Wireframe";
 
     // Points group
     RibbonGroup points{"Points", {
@@ -185,31 +185,25 @@ void RibbonUI::buildWireframeTab() {
     addTab(tab);
 }
 
-void RibbonUI::buildSurfacesTab() {
+void RibbonUI::buildSurfacesSolidsTab() {
     RibbonTab tab;
-    tab.name = "Surfaces";
-    RibbonGroup create{"Create", {
+    tab.name = "Surfaces & Solids";
+
+    // ── Surfaces ──────────────────────────────────────────────────────────
+    RibbonGroup surfCreate{"Surf Create", {
         {IDM_SURF_LOFT,    "Loft",    "Loft surface through cross-sections"},
         {IDM_SURF_REVOLVE, "Revolve", "Revolve a curve about an axis"},
         {IDM_SURF_EXTEND,  "Extend",  "Extend a surface to meet another"}
     }};
-    RibbonGroup edit{"Edit", {
+    RibbonGroup surfEdit{"Surf Edit", {
         {IDM_SURF_FILLET,  "Fillet",  "Fillet between two surfaces"},
         {IDM_SURF_OFFSET,  "Offset",  "Offset a surface by a distance"},
         {IDM_SURF_TRIM,    "Trim",    "Trim surface with a cutting curve"},
         {IDM_SURF_UNTRIM,  "Untrim",  "Remove trim boundaries from surface"}
     }};
-    tab.groups.push_back(create);
-    tab.groups.push_back(edit);
-    addTab(tab);
-}
 
-void RibbonUI::buildSolidsTab() {
-    RibbonTab tab;
-    tab.name = "Solids";
-
-    // Create group – history-based operations from wireframe chains
-    RibbonGroup create{"Create", {
+    // ── Solids – Create ───────────────────────────────────────────────────
+    RibbonGroup solCreate{"Solid Create", {
         {IDM_SOLID_EXTRUDE,  "Extrude",   "Push a closed wireframe chain into 3D by setting distance, direction, and body mode (Create Body or Cut Body)"},
         {IDM_SOLID_REVOLVE,  "Revolve",   "Spin a wireframe profile around a selected axis and angle (for example 360° for a full body)"},
         {IDM_SOLID_SWEEP,    "Sweep",     "Move a cross-section profile along a selected wireframe path"},
@@ -217,8 +211,8 @@ void RibbonUI::buildSolidsTab() {
         {IDM_SOLID_THICKEN,  "Thicken",   "Turn a thin surface into a solid by applying thickness in a chosen direction"}
     }};
 
-    // Primitives group – drop standard shapes without needing wireframe
-    RibbonGroup prims{"Primitives", {
+    // ── Solids – Primitives ───────────────────────────────────────────────
+    RibbonGroup solPrims{"Primitives", {
         {IDM_SOLID_BLOCK,    "Block",     "Create a rectangular solid from dimensions or two corner points"},
         {IDM_SOLID_CYLINDER, "Cylinder",  "Create a cylindrical solid with a defined radius and height"},
         {IDM_SOLID_SPHERE,   "Sphere",    "Create a solid ball from a centre point and radius"},
@@ -226,8 +220,8 @@ void RibbonUI::buildSolidsTab() {
         {IDM_SOLID_TORUS,    "Torus",     "Create a donut-shaped solid from a major and minor radius"}
     }};
 
-    // Modify group – refine features on an existing solid
-    RibbonGroup modify{"Modify", {
+    // ── Solids – Modify ───────────────────────────────────────────────────
+    RibbonGroup solModify{"Solid Modify", {
         {IDM_SOLID_FILLET,   "Fillet",    "Round selected solid edges or faces with a constant fillet radius"},
         {IDM_SOLID_CHAMFER,  "Chamfer",   "Apply a flat angled cut to selected edges using distance or distance-angle values"},
         {IDM_SOLID_SHELL,    "Shell",     "Hollow a solid by selecting an opening face and setting wall thickness"},
@@ -235,31 +229,33 @@ void RibbonUI::buildSolidsTab() {
         {IDM_SOLID_TRIM,     "Trim",      "Trim a solid to a plane or surface and keep the side you need"}
     }};
 
-    // Boolean group – combine or subtract solid bodies
-    RibbonGroup boolean_{"Boolean", {
+    // ── Solids – Boolean ──────────────────────────────────────────────────
+    RibbonGroup solBoolean{"Boolean", {
         {IDM_SOLID_UNION,    "Add",       "Merge target and tool solids into a single body (Boolean Add)"},
         {IDM_SOLID_SUBTRACT, "Remove",    "Subtract tool solids from the target body (Boolean Remove)"},
         {IDM_SOLID_INTERSECT,"Common",    "Keep only the overlapping volume shared by selected solids (Boolean Common)"}
     }};
 
-    // Advanced / Specialized group
-    RibbonGroup advanced{"Advanced", {
+    // ── Solids – Advanced ─────────────────────────────────────────────────
+    RibbonGroup solAdvanced{"Advanced", {
         {IDM_SOLID_HOLE,     "Hole",      "Create complex holes: simple, counterbore, countersink, taper, or threaded"},
         {IDM_SOLID_IMPRESS,  "Impression","Generate the negative of a solid (useful for molds and electrodes)"},
         {IDM_SOLID_FROM_SURF,"From Surfs","Convert a collection of closed surfaces into a watertight solid body"}
     }};
 
-    tab.groups.push_back(create);
-    tab.groups.push_back(prims);
-    tab.groups.push_back(modify);
-    tab.groups.push_back(boolean_);
-    tab.groups.push_back(advanced);
+    tab.groups.push_back(surfCreate);
+    tab.groups.push_back(surfEdit);
+    tab.groups.push_back(solCreate);
+    tab.groups.push_back(solPrims);
+    tab.groups.push_back(solModify);
+    tab.groups.push_back(solBoolean);
+    tab.groups.push_back(solAdvanced);
     addTab(tab);
 }
 
 void RibbonUI::buildModelPrepTab() {
     RibbonTab tab;
-    tab.name = "Model Prep";
+    tab.name = "Preparation";
     RibbonGroup repair{"Repair", {
         {IDM_PREP_HEAL,      "Heal",       "Heal gaps and surface inconsistencies"},
         {IDM_PREP_REM_FILLET,"Rem. Fillet","Remove small fillet faces"},
@@ -275,16 +271,17 @@ void RibbonUI::buildModelPrepTab() {
     addTab(tab);
 }
 
-void RibbonUI::buildMachineTab() {
+void RibbonUI::buildToolpathTab() {
     RibbonTab tab;
-    tab.name = "Machine";
-    RibbonGroup gen2D{"2D", {
+    tab.name = "Toolpath Generation";
+
+    RibbonGroup gen2D{"2D Strategies", {
         {IDM_MACHINE_GEN_POCKET,  "2D Pocket",  "Generate a dynamic 2D pocket toolpath"},
         {IDM_MACHINE_GEN_CONTOUR, "2D Contour", "Generate a dynamic 2D contour toolpath"},
         {IDM_MACHINE_CHAMFER,     "Chamfer",    "Generate a chamfer toolpath"},
         {IDM_MACHINE_THREAD,      "Thread Mill","Generate a thread milling toolpath"}
     }};
-    RibbonGroup gen3D{"3D", {
+    RibbonGroup gen3D{"3D Strategies", {
         {IDM_MACHINE_3D_WATERLINE, "Waterline",  "Generate 3D Z-level waterline toolpath (F6)"},
         {IDM_MACHINE_3D_SCALLOP,   "Scallop",    "Generate 3D constant-scallop toolpath (F7)"},
         {IDM_MACHINE_3D_RASTER,    "Raster",     "Generate 3D parallel raster toolpath"},
@@ -295,27 +292,34 @@ void RibbonUI::buildMachineTab() {
         {IDM_MACHINE_PROBE_BORE,  "Probe Bore", "Probe bore / boss centre"},
         {IDM_MACHINE_PROBE_CORNER,"Probe Corner","Probe a rectangular corner"}
     }};
-    RibbonGroup ops{"Simulate", {
+    RibbonGroup simulate{"Simulate", {
         {IDM_MACHINE_BACKPLOT, "Backplot",    "Run backplot animation"},
         {IDM_MACHINE_VERIFY,   "Verify",      "Run solid verify"},
         {IDM_MACHINE_SIM,      "Machine Sim", "Run machine simulation"}
     }};
-    RibbonGroup post{"Output", {
-        {IDM_MACHINE_POST,    "Post",    "Generate G-code (post-process) [Ctrl+P]"},
-        {IDM_MACHINE_REGEN,   "Regen",   "Regenerate all toolpaths"},
-        {IDM_MACHINE_SUMMARY, "Summary", "Show machining time / length summary"}
-    }};
     RibbonGroup toolpathMgr{"Manager", {
-        {IDM_TOOLPATH_MGR_TOGGLE,  "Manager [T]",     "Open Toolpath Manager [T]"},
-        {IDM_TOOLPATH_TOGGLE_DISP, "Show/Hide [C+S+T]","Toggle toolpath display [Ctrl+Shift+T]"},
+        {IDM_TOOLPATH_MGR_TOGGLE,  "Manager [T]",        "Open Toolpath Manager [T]"},
+        {IDM_TOOLPATH_TOGGLE_DISP, "Show/Hide [C+S+T]",  "Toggle toolpath display [Ctrl+Shift+T]"},
         {IDM_TOOLPATH_COPY_PARAMS, "Copy Params [C+S+C]","Copy toolpath parameters [Ctrl+Shift+C]"}
     }};
     tab.groups.push_back(gen2D);
     tab.groups.push_back(gen3D);
     tab.groups.push_back(probe);
-    tab.groups.push_back(ops);
-    tab.groups.push_back(post);
+    tab.groups.push_back(simulate);
     tab.groups.push_back(toolpathMgr);
+    addTab(tab);
+}
+
+void RibbonUI::buildMachineControlTab() {
+    RibbonTab tab;
+    tab.name = "Machine Control";
+
+    RibbonGroup output{"Output", {
+        {IDM_MACHINE_POST,    "Post",    "Generate G-code via post-processor [Ctrl+P]"},
+        {IDM_MACHINE_REGEN,   "Regen",   "Regenerate all dirty toolpaths"},
+        {IDM_MACHINE_SUMMARY, "Summary", "Show machining time / length summary"}
+    }};
+    tab.groups.push_back(output);
     addTab(tab);
 }
 

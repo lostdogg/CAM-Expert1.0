@@ -65,7 +65,8 @@ private:
     std::vector<MaskButton> m_buttons;
 
     static constexpr const wchar_t* CLASS_NAME = L"CAMExpertSelBar";
-    static constexpr int BTN_HEIGHT = 28;
+    static constexpr int BTN_HEIGHT  = 28;
+    static constexpr int BTN_WIDTH   = 42;  // width used in horizontal layout
     static constexpr int BTN_BASE_ID = 6000;
 };
 
