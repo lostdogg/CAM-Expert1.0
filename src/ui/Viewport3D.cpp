@@ -262,10 +262,6 @@ void Viewport3D::render() {
 
 // --------------------------------------------------------------------------
 void Viewport3D::drawBackground() {
-    RECT rc{};
-    GetClientRect(m_hwnd, &rc);
-    if (rc.right <= rc.left || rc.bottom <= rc.top) return;
-
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
     glLoadIdentity();

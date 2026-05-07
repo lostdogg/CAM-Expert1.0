@@ -323,8 +323,7 @@ LRESULT MainWindow::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         HDC hdc = reinterpret_cast<HDC>(wParam);
         RECT rc{};
         GetClientRect(m_hwnd, &rc);
-        FillRect(hdc, &rc, m_backgroundBrush ? m_backgroundBrush
-                                             : reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1));
+        FillRect(hdc, &rc, m_backgroundBrush);
         return 1;
     }
 
