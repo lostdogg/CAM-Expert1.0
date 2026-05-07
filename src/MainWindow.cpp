@@ -4604,8 +4604,13 @@ void MainWindow::appendAudit(const std::wstring& message) {
     wchar_t stamp[48] = {};
     std::swprintf(stamp, 48, L"[%02d:%02d:%02d] ", st.wHour, st.wMinute, st.wSecond);
     m_operationAudit.emplace_back(std::wstring(stamp) + message);
-    while (m_operationAudit.size() > 120)
-        m_operationAudit.erase(m_operationAudit.begin());
+    if (m_operationAudit.size() > 120) {
+        const auto excess = m_operationAudit.size() - 120;
+        m_operationAudit.erase(
+            m_operationAudit.begin(),
+            m_operationAudit.begin()
+                + static_cast<std::vector<std::wstring>::difference_type>(excess));
+    }
 }
 
 // --------------------------------------------------------------------------
@@ -4794,7 +4799,7 @@ void MainWindow::setupConstraints() {
     if (!m_wfScene) return;
     double action = 1.0;
     if (!promptSingle(L"Setup Constraints",
-                      L"Action (1=Add Coincident, 2=Add Horizontal, 3=Add Vertical, 4=Add Distance, 5=List, 6=Delete, 7=Solve, 8=Clear):",
+                      L"Action:\n1 Coincident  2 Horizontal  3 Vertical  4 Distance\n5 List  6 Delete  7 Solve  8 Clear",
                       action, action))
         return;
     const int choice = static_cast<int>(std::round(action));
@@ -4925,7 +4930,7 @@ void MainWindow::setupConstraints() {
 void MainWindow::setupToolDatabase() {
     double action = 1.0;
     if (!promptSingle(L"Setup Tool/Material Database",
-                      L"Action (1=Summary, 2=Search material, 3=Upsert tool, 4=Upsert material, 5=Upsert cutting data, 6=Export SQL, 7=Apply DB->libraries, 8=Sync libraries->DB):",
+                      L"Action:\n1 Summary 2 Search 3 Upsert Tool 4 Upsert Material\n5 Upsert Cutting 6 Export SQL 7 Apply DB->Libraries 8 Sync Libraries->DB",
                       action, action))
         return;
     const int choice = static_cast<int>(std::round(action));
@@ -4991,9 +4996,15 @@ void MainWindow::setupToolDatabase() {
                           L"Surface speed min (m/min):", vcMin, vcMin,
                           L"Surface speed max (m/min):", vcMax, vcMax))
             return;
+        int cls = std::max(0, static_cast<int>(std::round(matClass)));
+        if (cls > static_cast<int>(MaterialClass::Custom)) {
+            MessageBoxW(m_hwnd, L"Material class out of range. Use 0..9.",
+                        L"Upsert Material", MB_OK | MB_ICONWARNING);
+            return;
+        }
         SqlMaterialRow row;
         row.key = "mat_" + std::to_string(static_cast<int>(std::round(matClass)));
-        row.material.matClass = static_cast<MaterialClass>(std::max(0, static_cast<int>(std::round(matClass))));
+        row.material.matClass = static_cast<MaterialClass>(cls);
         row.material.name = row.key;
         row.material.surfaceSpeedMin = vcMin;
         row.material.surfaceSpeedMax = std::max(vcMin, vcMax);
@@ -5010,9 +5021,15 @@ void MainWindow::setupToolDatabase() {
                           L"Material class:", matClass, matClass,
                           L"Surface speed min (m/min):", vcMin, vcMin))
             return;
+        int cls = std::max(0, static_cast<int>(std::round(matClass)));
+        if (cls > static_cast<int>(MaterialClass::Custom)) {
+            MessageBoxW(m_hwnd, L"Material class out of range. Use 0..9.",
+                        L"Upsert Cutting Data", MB_OK | MB_ICONWARNING);
+            return;
+        }
         SqlCuttingDataRow row;
         row.toolKey = "tool_" + std::to_string(static_cast<int>(std::round(toolId)));
-        row.materialClass = static_cast<MaterialClass>(std::max(0, static_cast<int>(std::round(matClass))));
+        row.materialClass = static_cast<MaterialClass>(cls);
         row.nominalDiameter = 10.0;
         row.surfaceSpeedMin = vcMin;
         row.surfaceSpeedMax = vcMin * 1.5;
