@@ -88,6 +88,13 @@ struct PostConfig {
     bool   feedInMMMin     = true;  // true=mm/min (G94), false=mm/rev (G95)
     bool   constantSurfaceSpeed = false;  // G96 (turning)
 
+    // ---- Inverse-Time / DPM feedrate (G93) ----
+    // When true, 5-axis linear moves are output using G93 inverse-time feed
+    // instead of G94 mm/min.  The F-word becomes 1/T where T = dist/feed.
+    // The post emits G94 on rapid moves and G93 on cutting moves when the
+    // toolpath point has a non-zero toolAxis (i.e. is a 5-axis move).
+    bool   useInverseTimeFeed   = false;
+
     // ---- Machine limits (for over-travel detection) ----
     double xMin = -500, xMax = 500;
     double yMin = -400, yMax = 400;

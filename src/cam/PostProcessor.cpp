@@ -413,13 +413,26 @@ std::string PostProcessor::formatRecord(const NciRecord& rec,
 
     bool isArc = (rec.code == 2 || rec.code == 3);
 
+    // Detect 5-axis move: tool axis deviates from straight-down (0,0,1)
+    bool is5Axis = (std::abs(rec.i) > 1e-6 || std::abs(rec.j) > 1e-6 ||
+                    std::abs(rec.k - 1.0) > 1e-6);
+
+    // Inverse-time mode (G93): emit for 5-axis cutting moves only
+    bool useInvTime = m_cfg.useInverseTimeFeed && !rec.isRapid && !isArc && is5Axis;
+
     // Modal suppression only applies to G01; arcs and rapids always explicit
-    bool suppress = m_cfg.modalCodes && (gCode == "G01") && modalG01 && !isArc;
+    bool suppress = m_cfg.modalCodes && (gCode == "G01") && modalG01 && !isArc && !useInvTime;
     if (!suppress) {
-        oss << gCode << " ";
-        if (gCode == "G01") modalG01 = true;
-        else if (gCode == "G00") modalG01 = false;
-        else if (isArc)          modalG01 = false; // reset after arc
+        if (useInvTime) {
+            // G93 inverse-time mode; always explicit (not modal with G01)
+            oss << "G93 ";
+            modalG01 = false;
+        } else {
+            oss << gCode << " ";
+            if (gCode == "G01") modalG01 = true;
+            else if (gCode == "G00") modalG01 = false;
+            else if (isArc)          modalG01 = false;
+        }
     }
 
     // Coordinates – only output changed axes
@@ -429,6 +442,13 @@ std::string PostProcessor::formatRecord(const NciRecord& rec,
         oss << "Y" << coord(rec.y) << " ";
     if (std::abs(rec.z - prev.z) > 1e-6)
         oss << "Z" << coord(rec.z) << " ";
+
+    // 5-axis tool vector output (I, J, K)
+    if (is5Axis) {
+        oss << "I" << coord(rec.i) << " ";
+        oss << "J" << coord(rec.j) << " ";
+        oss << "K" << coord(rec.k) << " ";
+    }
 
     // Arc center I/J/K offsets (relative from current position to arc centre)
     // The NciRecord stores the arc centre in i/j/k when code==2 or code==3.
@@ -444,9 +464,23 @@ std::string PostProcessor::formatRecord(const NciRecord& rec,
             oss << "K" << coord(arcK) << " ";
     }
 
-    // Feed rate (only output when changed)
-    if (std::abs(rec.feedRate - prev.feedRate) > 1e-3 && !rec.isRapid)
-        oss << "F" << coord(rec.feedRate) << " ";
+    // Feed rate
+    if (!rec.isRapid) {
+        if (useInvTime) {
+            // Compute move distance for inverse-time calculation
+            double dx = rec.x - prev.x;
+            double dy = rec.y - prev.y;
+            double dz = rec.z - prev.z;
+            double dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+            double fInvTime = MultiAxis::inverseTimeFeed(dist, rec.feedRate);
+            if (fInvTime > 1e-9)
+                oss << "F" << coord(fInvTime) << " ";
+        } else {
+            // Standard mm/min feed (G94)
+            if (std::abs(rec.feedRate - prev.feedRate) > 1e-3)
+                oss << "F" << coord(rec.feedRate) << " ";
+        }
+    }
 
     prev = rec;
     oss << "\n";
