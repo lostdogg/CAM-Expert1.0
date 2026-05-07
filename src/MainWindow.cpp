@@ -2941,6 +2941,7 @@ void MainWindow::createWireframe(int commandId) {
                            L"X (mm):", x3, x3,
                            L"Y (mm):", y3, y3)) return;
 
+        // Circumcircle determinant for the three input points.
         const double d = 2.0 * (x1 * (y2 - y3) +
                                 x2 * (y3 - y1) +
                                 x3 * (y1 - y2));
@@ -2967,14 +2968,13 @@ void MainWindow::createWireframe(int commandId) {
         }
 
         auto normalizeAngle = [kTwoPi](double a) {
-            while (a < 0.0) a += kTwoPi;
-            while (a >= kTwoPi) a -= kTwoPi;
+            a = std::fmod(a, kTwoPi);
+            if (a < 0.0) a += kTwoPi;
             return a;
         };
         auto ccwSpan = [kTwoPi](double start, double end) {
-            double span = end - start;
-            while (span < 0.0) span += kTwoPi;
-            while (span >= kTwoPi) span -= kTwoPi;
+            double span = std::fmod(end - start, kTwoPi);
+            if (span < 0.0) span += kTwoPi;
             return span;
         };
 
