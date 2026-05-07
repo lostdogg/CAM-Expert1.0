@@ -7,6 +7,10 @@
 #include "simulation/Verify.h"
 #include "cad/BRep.h"
 #include "cad/WireframeScene.h"
+#include "cad/ConstraintSolver.h"
+#include "cam/MaterialLibrary.h"
+#include "cam/CloudToolLibrary.h"
+#include "cam/SqlToolDatabase.h"
 #include "managers/SolidsManager.h"
 
 // Forward declarations
@@ -54,6 +58,12 @@ constexpr int IDM_MACHINE_3D_WATERLINE= 2014; // Generate 3D waterline (Z-level)
 constexpr int IDM_MACHINE_3D_SCALLOP  = 2015; // Generate 3D scallop toolpath
 constexpr int IDM_MACHINE_3D_RASTER   = 2016; // Generate 3D raster toolpath
 constexpr int IDM_MACHINE_5AXIS       = 2017; // Generate 5-axis swarf toolpath
+constexpr int IDM_SETUP_CONSTRAINTS   = 2021; // Setup constraints workflow
+constexpr int IDM_SETUP_POST_PROFILE  = 2022; // Setup post profile workflow
+constexpr int IDM_SETUP_TOOL_DB       = 2023; // Setup SQL tool/material workflow
+constexpr int IDM_SETUP_PERF_MODE     = 2024; // Setup performance mode
+constexpr int IDM_SETUP_GUIDANCE      = 2025; // Show context workflow guidance
+constexpr int IDM_SETUP_AUDIT_LOG     = 2026; // Show operation audit trail
 
 constexpr int IDM_VIEW_WIREFRAME       = 3001;
 constexpr int IDM_VIEW_SHADED          = 3002;
@@ -369,6 +379,12 @@ private:
     void generate5AxisSwarf();       // 5-axis swarf milling along active surface
     void regenerateAllToolpaths();   // Regen all dirty toolpaths
     void showMachiningSummary();     // Stats dialog (time, length, operations)
+    void setupConstraints();         // Constraint setup and diagnostics workflow
+    void setupPostProfile();         // Script profile select/validate/clear workflow
+    void setupToolDatabase();        // SQL data browse/search/edit/import/export
+    void setupPerformanceMode();     // Quality/Balanced/Speed tuning
+    void showWorkflowGuidance();     // Context-sensitive next-step guidance
+    void showOperationAuditTrail();  // Recent operation-level audit entries
 
     // --- Project serialisation (CAMX format) ---
     void loadProjectCamx(const std::wstring& path);
@@ -376,6 +392,9 @@ private:
 
     // --- Utility ---
     void updateWindowTitle();   // Reflect m_currentFile in title bar
+    void appendAudit(const std::wstring& message);
+    bool preflightForPosting(std::wstring& reason) const;
+    bool preflightForSimulation(std::wstring& reason) const;
 
     // --- Input dialog helpers ---
     // Show a one-value prompt; returns true if the user clicked OK.
@@ -429,6 +448,25 @@ private:
 
     // Wireframe entity scene (geometry store + Cplane + Z-depth state)
     std::unique_ptr<WireframeScene>   m_wfScene;
+    ConstraintSolver                  m_constraintSolver;
+    MaterialLibrary                   m_materialLib;
+    CloudToolLibrary                  m_cloudToolLib;
+    SqlToolDatabase                   m_sqlToolDb;
+    std::string                       m_activePostProfilePath;
+    enum class PerformanceMode { Quality, Balanced, Speed };
+    PerformanceMode                   m_perfMode = PerformanceMode::Balanced;
+    struct PromptDefaults {
+        double waterlineToolDiam = 12.0;
+        double waterlineZStep    = 1.0;
+        double scallopToolDiam   = 8.0;
+        double scallopStepOver   = 0.5;
+        double rasterToolDiam    = 10.0;
+        double rasterStepOver    = 0.5;
+        double rasterAngleDeg    = 0.0;
+        double swarfToolDiam     = 16.0;
+        double swarfLeadAngle    = 5.0;
+    } m_promptDefaults;
+    std::vector<std::wstring>         m_operationAudit;
 
     // Copilot
     std::unique_ptr<CopilotPanel>     m_copilotPanel;

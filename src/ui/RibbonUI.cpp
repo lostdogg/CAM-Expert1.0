@@ -338,7 +338,16 @@ void RibbonUI::buildMachineControlTab() {
         {IDM_MACHINE_REGEN,   "Regen",   "Regenerate all dirty toolpaths"},
         {IDM_MACHINE_SUMMARY, "Summary", "Show machining time / length summary"}
     }};
+    RibbonGroup setup{"Setup", {
+        {IDM_SETUP_CONSTRAINTS,  "Constraints", "Create/list/delete/solve sketch constraints with diagnostics"},
+        {IDM_SETUP_POST_PROFILE, "Post Profile", "Load/validate/clear scriptable post profiles"},
+        {IDM_SETUP_TOOL_DB,      "Tool DB", "Browse/search/edit/export/import SQL tool/material/cutting data"},
+        {IDM_SETUP_PERF_MODE,    "Performance", "Select Quality/Balanced/Speed mode and OpenMP visibility"},
+        {IDM_SETUP_GUIDANCE,     "Guidance", "Show context-sensitive workflow guidance"},
+        {IDM_SETUP_AUDIT_LOG,    "Audit", "Show recent operation-level audit trail"}
+    }};
     tab.groups.push_back(output);
+    tab.groups.push_back(setup);
     addTab(tab);
 }
 
@@ -563,6 +572,9 @@ static int iconShapeForId(int cmdId) {
     case IDM_MACHINE_PROBE_CORNER: case IDM_MACHINE_BACKPLOT:
     case IDM_MACHINE_VERIFY: case IDM_MACHINE_SIM: case IDM_MACHINE_POST:
     case IDM_MACHINE_REGEN: case IDM_MACHINE_SUMMARY:
+    case IDM_SETUP_CONSTRAINTS: case IDM_SETUP_POST_PROFILE:
+    case IDM_SETUP_TOOL_DB: case IDM_SETUP_PERF_MODE:
+    case IDM_SETUP_GUIDANCE: case IDM_SETUP_AUDIT_LOG:
     case IDM_TOOLPATH_MGR_TOGGLE: case IDM_TOOLPATH_TOGGLE_DISP:
     case IDM_TOOLPATH_COPY_PARAMS:
         return ISHAPE_GEAR;
