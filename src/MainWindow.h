@@ -210,6 +210,7 @@ constexpr int IDM_CTX_TOP             = 7103;  // Top View
 constexpr int IDM_CTX_RIGHT           = 7104;  // Right View
 constexpr int IDM_CTX_CLEAR_COLORS    = 7105;  // Clear Colors (reset entity colours)
 constexpr int IDM_HELP_ABOUT      = 9001;
+constexpr int IDM_COPILOT_TOGGLE  = 9002;  // Toggle the AI Copilot panel
 constexpr int IDM_HELP_TOPICS     = 9003;  // F1 – Open help topics
 
 // Edit menu command IDs
