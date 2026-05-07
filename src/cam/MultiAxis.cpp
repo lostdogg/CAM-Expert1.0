@@ -140,11 +140,11 @@ IKResult MultiAxis::solveIK_AC(const Geom::Vec3& toolVec,
     // Both valid: apply preference
     switch (kin.tiltPref) {
     case MachineKinematics::TiltPreference::PositiveA:
-        res.usedAlternate = (aAlt > aPrim) ? true : false;
+        res.usedAlternate = (aAlt > aPrim);
         break;
 
     case MachineKinematics::TiltPreference::NegativeA:
-        res.usedAlternate = (aAlt < aPrim) ? true : false;
+        res.usedAlternate = (aAlt < aPrim);
         break;
 
     case MachineKinematics::TiltPreference::KeepPrevious:

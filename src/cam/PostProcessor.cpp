@@ -413,8 +413,10 @@ std::string PostProcessor::formatRecord(const NciRecord& rec,
 
     bool isArc = (rec.code == 2 || rec.code == 3);
 
-    // Detect 5-axis move: tool axis deviates from straight-down (0,0,1)
-    bool is5Axis = (std::abs(rec.i) > 1e-6 || std::abs(rec.j) > 1e-6 ||
+    // Detect 5-axis move: tool axis deviates from straight-down (0,0,1).
+    // For arc moves (code 2/3), i/j/k hold the arc centre, not the tool axis.
+    bool is5Axis = !isArc &&
+                   (std::abs(rec.i) > 1e-6 || std::abs(rec.j) > 1e-6 ||
                     std::abs(rec.k - 1.0) > 1e-6);
 
     // Inverse-time mode (G93): emit for 5-axis cutting moves only
