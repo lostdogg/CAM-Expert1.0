@@ -150,6 +150,8 @@ High-level workflow aligns to:
 - `F8` Cycle construction plane
 - `F9` Set Z-depth
 
+> Function keys are routed via command accelerators and `WM_KEYDOWN` handling in `MainWindow`; `F1` is currently bound to Help Topics.
+
 ### Toolpath manager and utility
 - `T` Toolpath manager toggle
 - `Ctrl+Shift+T` Toggle toolpath display
@@ -281,14 +283,14 @@ CAM-Expert1.0/
 
 ## 7) Build and run
 
-## Requirements
+### Requirements
 - Windows 10/11 (primary runtime target)
 - CMake 3.20+
 - C++20-capable compiler/toolset
 - Visual Studio generator (2019/2022/2026 presets) or MinGW-w64 on Windows
 - OpenGL system libs (Windows platform libs)
 
-## Configure/build (Windows examples)
+### Configure/build (Windows examples)
 
 ### Visual Studio 2026
 ```powershell
@@ -371,6 +373,7 @@ OpenMP is optional. If unavailable, project builds without OpenMP acceleration p
 - No full automated test harness is present yet.
 - Some advanced workflow entries are scaffold/foundation-level and continue to evolve.
 - Repository currently does not include a top-level `LICENSE` file.
+- Copilot panel toggle exists in UI commands/menu (`IDM_COPILOT_TOGGLE`); it is not currently bound to a default function-key shortcut.
 
 ---
 
