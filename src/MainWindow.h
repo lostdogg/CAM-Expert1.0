@@ -118,6 +118,7 @@ constexpr int IDM_WF_BBOX            = 4025;  // Bounding Box (2D/3D)
 // Wireframe tab commands – Curves (extraction) group
 constexpr int IDM_WF_CURVE_ONE_EDGE  = 4026;  // Curve One Edge (from solid/surface edge)
 constexpr int IDM_WF_CURVE_ALL_EDGES = 4027;  // Curve All Edges
+constexpr int IDM_WF_SILHOUETTE      = 4044;  // Silhouette Boundary (projected outer boundary)
 constexpr int IDM_WF_CURVE_SLICE_PLN = 4028;  // Curve Slice by Plane
 constexpr int IDM_WF_CURVE_SLICE_CRV = 4029;  // Curve Slice Along Curve
 constexpr int IDM_WF_CURVE_FLOWLINE  = 4030;  // Curve Flowline (U/V)

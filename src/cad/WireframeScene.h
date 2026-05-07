@@ -103,6 +103,7 @@ public:
 
     // Entity management
     void addEntity(WfEntity e);
+    bool setEntity(int index, WfEntity e); // replace entity at index
     void removeEntity(int index);  // remove entity at index; adjusts selection set
     void clear();
     int  entityCount() const { return static_cast<int>(m_entities.size()); }
