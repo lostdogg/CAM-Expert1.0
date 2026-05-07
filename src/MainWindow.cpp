@@ -2087,15 +2087,15 @@ void MainWindow::solidEditFeature(int solidIdx, int featureIdx) {
 // --------------------------------------------------------------------------
 void MainWindow::createSolidBox() {
     double dx = 100.0, dy = 50.0, dz = 25.0;
-    if (!promptTriple(L"Extrude Solid",
+    if (!promptTriple(L"Create Box",
                       L"Length X (mm):", dx, dx,
                       L"Width  Y (mm):", dy, dy,
-                      L"Extrude Distance Z (mm):", dz, dz))
+                      L"Height Z (mm):", dz, dz))
         return;
 
     if (dx <= 0 || dy <= 0 || dz <= 0) {
-        MessageBoxW(m_hwnd, L"Dimensions and distance must be positive.",
-                    L"Extrude Solid", MB_OK | MB_ICONWARNING);
+        MessageBoxW(m_hwnd, L"Dimensions must be positive.",
+                    L"Create Box", MB_OK | MB_ICONWARNING);
         return;
     }
 
@@ -2134,7 +2134,7 @@ void MainWindow::createSolidBox() {
         m_copilotEngine->setRecognisedFeatures(features);
     }
 
-    std::wstring msg = L"Extrude: solid created with X/Y/Z = "
+    std::wstring msg = L"Box created: "
         + std::to_wstring(static_cast<int>(dx)) + L" × "
         + std::to_wstring(static_cast<int>(dy)) + L" × "
         + std::to_wstring(static_cast<int>(dz)) + L" mm";
@@ -2147,14 +2147,14 @@ void MainWindow::createSolidBox() {
 // --------------------------------------------------------------------------
 void MainWindow::createSolidCylinder() {
     double radius = 25.0, height = 50.0;
-    if (!promptDouble2(L"Revolve Solid",
+    if (!promptDouble2(L"Create Cylinder",
                        L"Radius (mm):", radius, radius,
                        L"Height (mm):", height, height))
         return;
 
     if (radius <= 0 || height <= 0) {
         MessageBoxW(m_hwnd, L"Radius and height must be positive.",
-                    L"Revolve Solid", MB_OK | MB_ICONWARNING);
+                    L"Create Cylinder", MB_OK | MB_ICONWARNING);
         return;
     }
 
@@ -2190,7 +2190,7 @@ void MainWindow::createSolidCylinder() {
     }
 
     wchar_t msg[128] = {};
-    std::swprintf(msg, 128, L"Revolve: solid created with R=%.4g mm, H=%.4g mm", radius, height);
+    std::swprintf(msg, 128, L"Cylinder created: R=%.4g mm, H=%.4g mm", radius, height);
     SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(msg));
 }
 
