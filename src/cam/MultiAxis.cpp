@@ -1,8 +1,16 @@
 #include "MultiAxis.h"
+#include "../cad/Geometry.h"
 #include <cmath>
 #include <algorithm>
 
 static constexpr double PIMA = 3.14159265358979323846; // π (pi) – avoids M_PI portability concerns
+
+// Helper: wrap angle to [-180, 180)
+static double wrapDeg(double d) {
+    while (d >  180.0) d -= 360.0;
+    while (d <= -180.0) d += 360.0;
+    return d;
+}
 
 // --------------------------------------------------------------------------
 MultiAxis::MultiAxis(MultiAxisParams params)
@@ -69,6 +77,192 @@ bool MultiAxis::inverseKinematics(const Geom::Vec3& toolAxis,
     if (aOut < kin.aAxisMin || aOut > kin.aAxisMax) return false;
     if (bOut < kin.bAxisMin || bOut > kin.bAxisMax) return false;
     return true;
+}
+
+// --------------------------------------------------------------------------
+// AC-machine IK solver
+//
+// Implements the specification formulas:
+//   C = atan2(J, I)
+//   A = acos(K)
+//
+// The two solutions arise because:
+//   primary:   A in  [0, 180°],  C = atan2(J, I)
+//   alternate: A in [-180°, 0°], C = atan2(J, I) + 180°  (flipped approach)
+//
+// Both solutions produce the same tool-axis direction.  The tiltPref setting
+// (and optionally the previous IK result) selects which one is used.
+// --------------------------------------------------------------------------
+IKResult MultiAxis::solveIK_AC(const Geom::Vec3& toolVec,
+                                 const MachineKinematics& kin,
+                                 const IKResult* prev) {
+    IKResult res;
+    Geom::Vec3 ax = toolVec.normalized();
+
+    // ---- Primary solution -------------------------------------------------
+    // A = acos(K),  C = atan2(J, I)
+    double aPrim = std::acos(std::max(-1.0, std::min(1.0, ax.z))) * 180.0 / PIMA;
+    double cPrim = std::atan2(ax.y, ax.x) * 180.0 / PIMA;
+
+    res.aPrimary = aPrim;
+    res.cPrimary = cPrim;
+    res.primaryValid = (aPrim >= kin.aAxisMin && aPrim <= kin.aAxisMax &&
+                        cPrim >= kin.cAxisMin && cPrim <= kin.cAxisMax);
+
+    // ---- Alternate solution -----------------------------------------------
+    // Flip A to its negative equivalent and rotate C by 180°
+    double aAlt = -aPrim;
+    double cAlt = wrapDeg(cPrim + 180.0);
+
+    res.aAlternate = aAlt;
+    res.cAlternate = cAlt;
+    res.alternateValid = (aAlt >= kin.aAxisMin && aAlt <= kin.aAxisMax &&
+                          cAlt >= kin.cAxisMin && cAlt <= kin.cAxisMax);
+
+    // ---- Solution selection -----------------------------------------------
+    // Default: use primary
+    res.usedAlternate = false;
+
+    // If only one solution is valid, choose it
+    if (!res.primaryValid && res.alternateValid) {
+        res.usedAlternate = true;
+        return res;
+    }
+    if (res.primaryValid && !res.alternateValid) {
+        res.usedAlternate = false;
+        return res;
+    }
+    if (!res.primaryValid && !res.alternateValid) {
+        // Neither within limits – pick primary and let caller handle it
+        return res;
+    }
+
+    // Both valid: apply preference
+    switch (kin.tiltPref) {
+    case MachineKinematics::TiltPreference::PositiveA:
+        res.usedAlternate = (aAlt > aPrim);
+        break;
+
+    case MachineKinematics::TiltPreference::NegativeA:
+        res.usedAlternate = (aAlt < aPrim);
+        break;
+
+    case MachineKinematics::TiltPreference::KeepPrevious:
+        if (prev) {
+            // Stay in the same A-sign quadrant as the previous move
+            double prevA = prev->aSelected();
+            double distPrim = std::abs(aPrim - prevA);
+            double distAlt  = std::abs(aAlt  - prevA);
+            res.usedAlternate = (distAlt < distPrim);
+        }
+        break;
+
+    case MachineKinematics::TiltPreference::MinTravel:
+    default:
+        if (prev) {
+            // Minimise total rotary travel (sum of |ΔA| + |ΔC|)
+            double prevA = prev->aSelected();
+            double prevC = prev->cSelected();
+            double travelPrim = std::abs(aPrim - prevA) + std::abs(wrapDeg(cPrim - prevC));
+            double travelAlt  = std::abs(aAlt  - prevA) + std::abs(wrapDeg(cAlt  - prevC));
+            res.usedAlternate = (travelAlt < travelPrim);
+        }
+        break;
+    }
+
+    return res;
+}
+
+// --------------------------------------------------------------------------
+// TCPC – Tool Centre Point Control
+//
+// Keeps the tool tip stationary on the part when the rotary axes tilt:
+//   P_new = R * (P_old − P_pivot) + P_pivot
+// --------------------------------------------------------------------------
+Geom::Vec3 MultiAxis::applyTCPC(const Geom::Vec3& pos,
+                                  const Geom::Mat3& R,
+                                  const Geom::Vec3& pivot) {
+    return R * (pos - pivot) + pivot;
+}
+
+// --------------------------------------------------------------------------
+// Vector Smoothing / Singularity Engine
+//
+// A singularity occurs when the tool axis aligns with Z (K ≈ 1), making
+// the C-axis indeterminate (gimbal lock).
+//
+// Algorithm (look-ahead):
+//  1. Scan ahead up to LOOKAHEAD points from each candidate point.
+//  2. If the angle between the tool axis and +Z is within thresholdDeg,
+//     a singularity passage is detected.
+//  3. A micro-tilt of microTiltDeg is introduced in the direction of the
+//     previous non-singular tool axis (or +X if unavailable) to force
+//     a predictable C-axis value through the crossing.
+// --------------------------------------------------------------------------
+void MultiAxis::smoothSingularities(Toolpath& tp,
+                                     const MachineKinematics& /*kin*/,
+                                     double thresholdDeg,
+                                     double microTiltDeg) {
+    auto& pts = tp.mutablePoints();
+    if (pts.size() < 2) return;
+
+    constexpr int LOOKAHEAD = 8;
+    const double cosThresh = std::cos(thresholdDeg * PIMA / 180.0);
+    const double tiltRad   = microTiltDeg * PIMA / 180.0;
+
+    // Track the last non-singular tilt direction for continuity
+    Geom::Vec3 tiltDir = {1.0, 0.0, 0.0};  // default X direction
+
+    for (std::size_t i = 0; i < pts.size(); ++i) {
+        Geom::Vec3 ax = pts[i].toolAxis.normalized();
+
+        // Dot product with +Z  (singularity when ax.z ≈ 1)
+        double cosAngle = ax.z;  // dot(ax, {0,0,1}) = ax.z for unit vectors
+        bool nearSingular = (cosAngle > cosThresh);
+
+        if (!nearSingular) {
+            // Update tilt direction: project ax onto XY plane
+            Geom::Vec3 xy = {ax.x, ax.y, 0.0};
+            if (xy.length() > 1e-6)
+                tiltDir = xy.normalized();
+            continue;
+        }
+
+        // Look ahead to determine the exit direction of the singularity zone
+        Geom::Vec3 exitDir = tiltDir;
+        for (int k = 1; k <= LOOKAHEAD && (i + static_cast<std::size_t>(k)) < pts.size(); ++k) {
+            Geom::Vec3 fwdAx = pts[i + static_cast<std::size_t>(k)].toolAxis.normalized();
+            double fwdCos = fwdAx.z;
+            if (fwdCos <= cosThresh) {
+                // This future point is outside the singularity zone – use its
+                // XY projection as the preferred exit direction
+                Geom::Vec3 xy = {fwdAx.x, fwdAx.y, 0.0};
+                if (xy.length() > 1e-6)
+                    exitDir = xy.normalized();
+                break;
+            }
+        }
+
+        // Blend entry and exit tilt directions
+        Geom::Vec3 blendDir = (tiltDir + exitDir).normalized();
+        if (blendDir.length() < 1e-9) blendDir = tiltDir;
+
+        // Apply micro-tilt: rotate tool axis slightly toward blendDir
+        // New axis = (original + blendDir * tan(tiltRad)).normalized()
+        Geom::Vec3 newAx = (ax + blendDir * std::tan(tiltRad)).normalized();
+        pts[i].toolAxis = newAx;
+    }
+}
+
+// --------------------------------------------------------------------------
+// Inverse-Time Feedrate (G93 / DPM)
+//
+// Returns the G93 F-word value = 1/T where T = distance / feedrate.
+// --------------------------------------------------------------------------
+double MultiAxis::inverseTimeFeed(double distance, double feedrateMmMin) {
+    if (distance < 1e-9 || feedrateMmMin < 1e-9) return 0.0;
+    double T = distance / feedrateMmMin;   // time in minutes
+    return 1.0 / T;                         // G93 F-word
 }
 
 // --------------------------------------------------------------------------

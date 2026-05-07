@@ -98,6 +98,93 @@ struct Triangle {
 };
 
 // --------------------------------------------------------------------------
+// 3×3 rotation matrix (row-major storage, used for kinematic calculations)
+//
+// Provides the standard rotation matrices required for 5-axis kinematics:
+//   Rx(θ) – rotation around X-axis (A-axis)
+//   Ry(θ) – rotation around Y-axis (B-axis)
+//   Rz(θ) – rotation around Z-axis (C-axis)
+//
+// Combined transforms follow standard matrix multiplication:
+//   M = Rz(C) * Rx(A)   (Table-Table AC machine)
+// --------------------------------------------------------------------------
+struct Mat3 {
+    // m[row][col]
+    double m[3][3] = {{1,0,0},{0,1,0},{0,0,1}};
+
+    static Mat3 identity() { return {}; }
+
+    // Rotation around X-axis (A-axis) by theta radians:
+    //   [ 1    0        0    ]
+    //   [ 0  cos(θ)  -sin(θ) ]
+    //   [ 0  sin(θ)   cos(θ) ]
+    static Mat3 Rx(double theta) {
+        Mat3 r;
+        double c = std::cos(theta), s = std::sin(theta);
+        r.m[0][0]=1; r.m[0][1]= 0; r.m[0][2]= 0;
+        r.m[1][0]=0; r.m[1][1]= c; r.m[1][2]=-s;
+        r.m[2][0]=0; r.m[2][1]= s; r.m[2][2]= c;
+        return r;
+    }
+
+    // Rotation around Y-axis (B-axis) by theta radians:
+    //   [  cos(θ)  0  sin(θ) ]
+    //   [    0     1    0    ]
+    //   [ -sin(θ)  0  cos(θ) ]
+    static Mat3 Ry(double theta) {
+        Mat3 r;
+        double c = std::cos(theta), s = std::sin(theta);
+        r.m[0][0]= c; r.m[0][1]=0; r.m[0][2]=s;
+        r.m[1][0]= 0; r.m[1][1]=1; r.m[1][2]=0;
+        r.m[2][0]=-s; r.m[2][1]=0; r.m[2][2]=c;
+        return r;
+    }
+
+    // Rotation around Z-axis (C-axis) by theta radians:
+    //   [ cos(θ)  -sin(θ)  0 ]
+    //   [ sin(θ)   cos(θ)  0 ]
+    //   [   0        0     1 ]
+    static Mat3 Rz(double theta) {
+        Mat3 r;
+        double c = std::cos(theta), s = std::sin(theta);
+        r.m[0][0]= c; r.m[0][1]=-s; r.m[0][2]=0;
+        r.m[1][0]= s; r.m[1][1]= c; r.m[1][2]=0;
+        r.m[2][0]= 0; r.m[2][1]= 0; r.m[2][2]=1;
+        return r;
+    }
+
+    // Matrix multiplication: (this) * o
+    Mat3 operator*(const Mat3& o) const {
+        Mat3 res;
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j) {
+                res.m[i][j] = 0;
+                for (int k = 0; k < 3; ++k)
+                    res.m[i][j] += m[i][k] * o.m[k][j];
+            }
+        return res;
+    }
+
+    // Transform a vector: result = (this) * v
+    Vec3 operator*(const Vec3& v) const {
+        return {
+            m[0][0]*v.x + m[0][1]*v.y + m[0][2]*v.z,
+            m[1][0]*v.x + m[1][1]*v.y + m[1][2]*v.z,
+            m[2][0]*v.x + m[2][1]*v.y + m[2][2]*v.z
+        };
+    }
+
+    // Transpose (= inverse for pure rotation matrices)
+    Mat3 transposed() const {
+        Mat3 r;
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                r.m[i][j] = m[j][i];
+        return r;
+    }
+};
+
+// --------------------------------------------------------------------------
 // 4×4 transformation matrix (column-major, OpenGL-compatible)
 // --------------------------------------------------------------------------
 struct Mat4 {
