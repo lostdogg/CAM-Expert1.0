@@ -45,8 +45,19 @@ docker run --rm camexpert-ci
 
 - Keep edits scoped and module-local.
 - Follow the existing style in touched files (naming, formatting, and structure).
+- Use the repository `.clang-format` as the canonical formatting baseline for C++ changes.
 - Keep Win32 command wiring in `MainWindow` synchronized with UI labels and behavior.
 - Update docs when changing command IDs, workflows, presets, or module layout.
+
+## Formatting and linting
+
+- Run `clang-format -i` on touched C++ source/header files before opening a PR.
+- Use `.clang-tidy` for optional local linting when your environment has a compatible compile database/toolchain.
+- Example local lint command:
+
+```bash
+clang-tidy -p build src/Application.cpp
+```
 
 ## Testing expectations
 
