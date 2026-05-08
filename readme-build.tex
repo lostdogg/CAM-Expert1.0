@@ -1,0 +1,211 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{gray!10},
+  frame=single,
+  breaklines=true,
+  columns=fullflexible,
+}
+
+\title{\textbf{CAM-Expert 1.2 --- Build Information}}
+\author{CAM-Expert Project}
+\date{}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+% ---------------------------------------------------------------------------
+\section{Requirements}
+
+\begin{itemize}
+  \item \textbf{OS:} Windows 10 or 11 (primary runtime target)
+  \item \textbf{CMake:} 3.20 or newer
+  \item \textbf{Compiler:} C++20-capable toolset
+    \begin{itemize}
+      \item Visual Studio 2019 (toolset v142), 2022 (v143), or 2026 (v180)
+      \item MinGW-w64 on Windows (GCC or Clang with Win32 headers)
+    \end{itemize}
+  \item \textbf{System libs:} Win32 platform libraries supplied by the Windows SDK
+    (\texttt{opengl32}, \texttt{glu32}, \texttt{gdi32}, \texttt{user32},
+     \texttt{comctl32}, \texttt{comdlg32}, \texttt{shell32}, \texttt{ole32},
+     \texttt{oleaut32}, \texttt{uuid}, \texttt{dwmapi}, \texttt{uxtheme})
+  \item \textbf{Optional:} OpenMP --- detected automatically; project builds without it
+    if unavailable (\texttt{CAMEXPERT\_USE\_OPENMP} is only defined when found)
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Configure and Build (Windows)}
+
+\subsection{Visual Studio 2026}
+\begin{lstlisting}[language=bash]
+cmake -B build -G "Visual Studio 18 2026" -A x64
+cmake --build build --config Release
+\end{lstlisting}
+
+\subsection{Visual Studio 2022}
+\begin{lstlisting}[language=bash]
+cmake -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release
+\end{lstlisting}
+
+\subsection{Visual Studio 2019}
+\begin{lstlisting}[language=bash]
+cmake -B build -G "Visual Studio 16 2019" -A x64
+cmake --build build --config Release
+\end{lstlisting}
+
+\subsection{MinGW-w64 on Windows}
+\begin{lstlisting}[language=bash]
+cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+\end{lstlisting}
+
+% ---------------------------------------------------------------------------
+\section{CMake Presets}
+
+Presets are defined in \texttt{CMakePresets.json} and are host-conditioned to
+Windows (\texttt{hostSystemName == Windows}).
+
+\begin{lstlisting}[language=bash]
+cmake --list-presets
+
+# Configure
+cmake --preset windows-vs2026   # Visual Studio 2026
+cmake --preset windows-vs2022   # Visual Studio 2022
+cmake --preset windows-vs2019   # Visual Studio 2019
+cmake --preset windows-mingw-release  # MinGW-w64
+
+# Build
+cmake --build --preset release-vs2026
+cmake --build --preset release-vs2022
+cmake --build --preset release-vs2019
+cmake --build --preset release-mingw
+\end{lstlisting}
+
+\noindent On non-Windows hosts the preset conditions will not match; use the
+explicit \texttt{-G} generator commands from Section~2 instead.
+
+% ---------------------------------------------------------------------------
+\section{Linux / Container Notes}
+
+A \texttt{Dockerfile} is provided for containerised configure/build
+reproducibility:
+
+\begin{lstlisting}[language=bash]
+docker build -t camexpert-ci .
+docker run --rm camexpert-ci
+\end{lstlisting}
+
+\noindent \textbf{Important:} CAM-Expert is a Win32 application that requires
+\texttt{windows.h} and the Windows SDK headers.  A Linux-native compile is
+expected to fail at the \texttt{windows.h} include unless a
+Windows-targeting cross-compilation toolchain is configured.  The Docker
+container is therefore useful only for CMake configure-step smoke checks,
+not for producing a runnable binary.
+
+% ---------------------------------------------------------------------------
+\section{CMake Build Variables}
+
+\begin{center}
+\begin{tabular}{lll}
+\hline
+\textbf{Variable} & \textbf{Default} & \textbf{Description} \\
+\hline
+\texttt{CMAKE\_BUILD\_TYPE} & (generator-dependent) & \texttt{Release} / \texttt{Debug} for Make-based generators \\
+\texttt{CAMEXPERT\_USE\_OPENMP} & auto-detected & Defined to \texttt{1} when OpenMP is found \\
+\hline
+\end{tabular}
+\end{center}
+
+% ---------------------------------------------------------------------------
+\section{Build Definitions (Always Active on Windows)}
+
+\begin{itemize}
+  \item \texttt{UNICODE}, \texttt{\_UNICODE} --- enable wide-character Win32 API
+  \item \texttt{WIN32\_LEAN\_AND\_MEAN} --- reduces Windows header bloat
+  \item \texttt{NOMINMAX} --- prevents \texttt{min}/\texttt{max} macro conflicts
+  \item \texttt{\_CRT\_SECURE\_NO\_WARNINGS} --- suppresses MSVC CRT deprecation warnings
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Compiler Options}
+
+\begin{center}
+\begin{tabular}{ll}
+\hline
+\textbf{Toolset} & \textbf{Flags} \\
+\hline
+MSVC & \texttt{/W4 /MP} \\
+GCC / Clang & \texttt{-Wall -Wextra -Wpedantic} \\
+\hline
+\end{tabular}
+\end{center}
+
+% ---------------------------------------------------------------------------
+\section{Install}
+
+\begin{lstlisting}[language=bash]
+cmake --install build --prefix <destination>
+\end{lstlisting}
+
+\noindent The executable \texttt{CAMExpert.exe} is installed to
+\texttt{<destination>/bin/}.
+
+% ---------------------------------------------------------------------------
+\section{Validation and Smoke Testing}
+
+There is currently \textbf{no automated unit-test suite}.  The recommended
+post-build validation workflow is:
+
+\begin{enumerate}
+  \item CMake configure smoke test (no errors during configure).
+  \item Build smoke test on a Windows toolchain (successful compile and link).
+  \item Manual UI and toolpath smoke run (wireframe / surface / solid actions).
+  \item CAM generation checks (2D, 3D, and multi-axis as applicable).
+  \item Post-output sanity check (inspect generated NC file contents).
+  \item Verify / backplot / machine-simulation smoke checks.
+\end{enumerate}
+
+% ---------------------------------------------------------------------------
+\section{Version Synchronisation}
+
+During release hardening, the version number must be kept consistent across:
+
+\begin{itemize}
+  \item \texttt{CMakeLists.txt} --- \texttt{project(CAMExpert VERSION 1.2.0 ...)}
+  \item \texttt{src/Application.h} --- application version string constants
+  \item \texttt{src/resources/CAMExpert.rc} --- Windows version resource fields
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Troubleshooting}
+
+\begin{description}
+  \item[\texttt{windows.h: No such file or directory}]
+    You are compiling outside a Windows-native or Windows-cross toolchain
+    environment.  This is expected on Linux unless Win32 headers are available.
+
+  \item[Visual Studio toolset mismatch (\texttt{MSB8020})]
+    Use the CMake generator that matches the Visual Studio version you have
+    installed, or add the required toolset component via Visual Studio
+    Installer.
+
+  \item[CMake preset not available]
+    Presets are host-conditioned for Windows.  On non-Windows hosts, use the
+    explicit \texttt{-G} generator commands from Section~2.
+
+  \item[OpenMP not found]
+    OpenMP is optional.  The project builds and runs without it; only certain
+    3D toolpath projection loops lose parallel acceleration.
+\end{description}
+
+\end{document}
