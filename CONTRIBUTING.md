@@ -51,13 +51,15 @@ docker run --rm camexpert-ci
 
 ## Formatting and linting
 
-- Run `clang-format -i` on touched C++ source/header files before opening a PR.
+- Run `clang-format -i` on touched C++ source/header files before opening a PR instead of reformatting unrelated files.
 - Use `.clang-tidy` for optional local linting when your environment has a compatible compile database/toolchain.
 - Example local lint command:
 
 ```bash
 clang-tidy -p build src/Application.cpp
 ```
+
+- GitHub Actions runs Windows CMake configure/build validation for pull requests and pushes in both Debug and Release.
 
 ## Testing expectations
 
