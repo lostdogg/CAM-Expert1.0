@@ -4,26 +4,29 @@ project(CAMExpert VERSION 1.2.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Windows-specific settings
-if(WIN32)
-    add_definitions(-DUNICODE -D_UNICODE -DWIN32_LEAN_AND_MEAN -DNOMINMAX)
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS")
-endif()
+function(camexpert_configure_target target)
+    target_include_directories(${target} PUBLIC src)
 
-# Source files
-set(SOURCES
-    src/main.cpp
-    src/Application.cpp
-    src/MainWindow.cpp
-    src/MainWindowFileCommands.cpp
-    src/MainWindowWireframeCommands.cpp
-    src/MainWindowSurfaceCommands.cpp
-    src/MainWindowSolidCommands.cpp
-    src/MainWindowCamCommands.cpp
-    src/MainWindowSetupWorkflowCommands.cpp
-    src/ui/RibbonUI.cpp
-    src/ui/Viewport3D.cpp
-    src/ui/SelectionBar.cpp
+    if(WIN32)
+        target_compile_definitions(${target} PRIVATE
+            UNICODE
+            _UNICODE
+            WIN32_LEAN_AND_MEAN
+            NOMINMAX
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /MP)
+        target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+
+add_library(CAMExpertCad STATIC)
+camexpert_configure_target(CAMExpertCad)
+target_sources(CAMExpertCad PRIVATE
     src/cad/Geometry.cpp
     src/cad/ConstraintSolver.cpp
     src/cad/BRep.cpp
@@ -33,6 +36,20 @@ set(SOURCES
     src/cad/ModelPrep.cpp
     src/cad/FeatureRecognition.cpp
     src/cad/WireframeScene.cpp
+    src/cad/Geometry.h
+    src/cad/ConstraintSolver.h
+    src/cad/BRep.h
+    src/cad/NurbsSurface.h
+    src/cad/MeshData.h
+    src/cad/FileImporter.h
+    src/cad/ModelPrep.h
+    src/cad/FeatureRecognition.h
+    src/cad/WireframeScene.h
+)
+
+add_library(CAMExpertCam STATIC)
+camexpert_configure_target(CAMExpertCam)
+target_sources(CAMExpertCam PRIVATE
     src/cam/Toolpath.cpp
     src/cam/DynamicMotion.cpp
     src/cam/Strategies2D.cpp
@@ -49,45 +66,6 @@ set(SOURCES
     src/cam/DynamicPlane.cpp
     src/cam/TransformToolpath.cpp
     src/cam/ProbingCycles.cpp
-    src/managers/ToolpathManager.cpp
-    src/managers/SolidsManager.cpp
-    src/managers/SurfacesManager.cpp
-    src/managers/LevelsManager.cpp
-    src/managers/PlanesManager.cpp
-    src/simulation/Backplot.cpp
-    src/simulation/Verify.cpp
-    src/simulation/MachineSimulation.cpp
-    src/copilot/IntentParser.cpp
-    src/copilot/ContextBuffer.cpp
-    src/copilot/ParameterNegotiator.cpp
-    src/copilot/AuditLog.cpp
-    src/copilot/CopilotEngine.cpp
-    src/copilot/LocalInferenceEngine.cpp
-    src/copilot/VectorDatabase.cpp
-    src/copilot/GeometricTokenizer.cpp
-    src/copilot/ConstrainedOutputValidator.cpp
-    src/copilot/SelfCorrectionLoop.cpp
-    src/ui/CopilotPanel.cpp
-)
-
-# Header files (for IDE visibility)
-set(HEADERS
-    src/Application.h
-    src/MainWindow.h
-    src/ui/CommandIds.h
-    src/ui/MenuCommands.h
-    src/ui/RibbonUI.h
-    src/ui/Viewport3D.h
-    src/ui/SelectionBar.h
-    src/cad/Geometry.h
-    src/cad/ConstraintSolver.h
-    src/cad/BRep.h
-    src/cad/NurbsSurface.h
-    src/cad/MeshData.h
-    src/cad/FileImporter.h
-    src/cad/ModelPrep.h
-    src/cad/FeatureRecognition.h
-    src/cad/WireframeScene.h
     src/cam/Toolpath.h
     src/cam/DynamicMotion.h
     src/cam/Strategies2D.h
@@ -104,14 +82,34 @@ set(HEADERS
     src/cam/DynamicPlane.h
     src/cam/TransformToolpath.h
     src/cam/ProbingCycles.h
-    src/managers/ToolpathManager.h
-    src/managers/SolidsManager.h
-    src/managers/SurfacesManager.h
-    src/managers/LevelsManager.h
-    src/managers/PlanesManager.h
+)
+target_link_libraries(CAMExpertCam PUBLIC CAMExpertCad)
+
+add_library(CAMExpertSimulation STATIC)
+camexpert_configure_target(CAMExpertSimulation)
+target_sources(CAMExpertSimulation PRIVATE
+    src/simulation/Backplot.cpp
+    src/simulation/Verify.cpp
+    src/simulation/MachineSimulation.cpp
     src/simulation/Backplot.h
     src/simulation/Verify.h
     src/simulation/MachineSimulation.h
+)
+target_link_libraries(CAMExpertSimulation PUBLIC CAMExpertCam CAMExpertCad)
+
+add_library(CAMExpertCopilot STATIC)
+camexpert_configure_target(CAMExpertCopilot)
+target_sources(CAMExpertCopilot PRIVATE
+    src/copilot/IntentParser.cpp
+    src/copilot/ContextBuffer.cpp
+    src/copilot/ParameterNegotiator.cpp
+    src/copilot/AuditLog.cpp
+    src/copilot/CopilotEngine.cpp
+    src/copilot/LocalInferenceEngine.cpp
+    src/copilot/VectorDatabase.cpp
+    src/copilot/GeometricTokenizer.cpp
+    src/copilot/ConstrainedOutputValidator.cpp
+    src/copilot/SelfCorrectionLoop.cpp
     src/copilot/IntentParser.h
     src/copilot/ContextBuffer.h
     src/copilot/ParameterNegotiator.h
@@ -122,22 +120,62 @@ set(HEADERS
     src/copilot/GeometricTokenizer.h
     src/copilot/ConstrainedOutputValidator.h
     src/copilot/SelfCorrectionLoop.h
+)
+target_link_libraries(CAMExpertCopilot PUBLIC CAMExpertCam CAMExpertCad)
+
+add_executable(CAMExpert WIN32)
+camexpert_configure_target(CAMExpert)
+target_sources(CAMExpert PRIVATE
+    src/main.cpp
+    src/Application.cpp
+    src/MainWindow.cpp
+    src/MainWindowFileCommands.cpp
+    src/MainWindowWireframeCommands.cpp
+    src/MainWindowSurfaceCommands.cpp
+    src/MainWindowSolidCommands.cpp
+    src/MainWindowCamCommands.cpp
+    src/MainWindowSetupWorkflowCommands.cpp
+    src/ui/RibbonUI.cpp
+    src/ui/Viewport3D.cpp
+    src/ui/SelectionBar.cpp
+    src/ui/CopilotPanel.cpp
+    src/managers/ToolpathManager.cpp
+    src/managers/SolidsManager.cpp
+    src/managers/SurfacesManager.cpp
+    src/managers/LevelsManager.cpp
+    src/managers/PlanesManager.cpp
+    src/Application.h
+    src/MainWindow.h
+    src/ui/CommandIds.h
+    src/ui/MenuCommands.h
+    src/ui/RibbonUI.h
+    src/ui/Viewport3D.h
+    src/ui/SelectionBar.h
     src/ui/CopilotPanel.h
+    src/managers/ToolpathManager.h
+    src/managers/SolidsManager.h
+    src/managers/SurfacesManager.h
+    src/managers/LevelsManager.h
+    src/managers/PlanesManager.h
     src/resources/resource.h
 )
 
-# Resource file (Windows only)
 if(WIN32)
-    list(APPEND SOURCES src/resources/CAMExpert.rc)
+    target_sources(CAMExpert PRIVATE src/resources/CAMExpert.rc)
 endif()
 
-add_executable(CAMExpert WIN32 ${SOURCES} ${HEADERS})
+target_link_libraries(CAMExpert PRIVATE
+    CAMExpertCopilot
+    CAMExpertSimulation
+    CAMExpertCam
+    CAMExpertCad
+)
 
-target_include_directories(CAMExpert PRIVATE src)
-
-# Windows libraries
 if(WIN32)
-    target_link_libraries(CAMExpert
+    set_target_properties(CAMExpert PROPERTIES
+        LINK_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS"
+    )
+    target_link_libraries(CAMExpert PRIVATE
         opengl32
         glu32
         gdi32
@@ -151,26 +189,17 @@ if(WIN32)
         dwmapi
         uxtheme
     )
-    # Enable visual styles (Common Controls v6)
     target_link_options(CAMExpert PRIVATE
         "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
     )
 endif()
 
-# Compiler-specific options
-if(MSVC)
-    target_compile_options(CAMExpert PRIVATE /W4 /MP)
-    target_compile_definitions(CAMExpert PRIVATE _CRT_SECURE_NO_WARNINGS)
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(CAMExpert PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-# Optional OpenMP acceleration for 3D toolpath projection loops
 find_package(OpenMP QUIET)
 if(OpenMP_CXX_FOUND)
     target_link_libraries(CAMExpert PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(CAMExpertCam PUBLIC OpenMP::OpenMP_CXX)
     target_compile_definitions(CAMExpert PRIVATE CAMEXPERT_USE_OPENMP=1)
+    target_compile_definitions(CAMExpertCam PRIVATE CAMEXPERT_USE_OPENMP=1)
 endif()
 
-# Install target
 install(TARGETS CAMExpert DESTINATION bin)
