@@ -15,6 +15,12 @@ set(SOURCES
     src/main.cpp
     src/Application.cpp
     src/MainWindow.cpp
+    src/MainWindowFileCommands.cpp
+    src/MainWindowWireframeCommands.cpp
+    src/MainWindowSurfaceCommands.cpp
+    src/MainWindowSolidCommands.cpp
+    src/MainWindowCamCommands.cpp
+    src/MainWindowSetupWorkflowCommands.cpp
     src/ui/RibbonUI.cpp
     src/ui/Viewport3D.cpp
     src/ui/SelectionBar.cpp
@@ -68,6 +74,8 @@ set(SOURCES
 set(HEADERS
     src/Application.h
     src/MainWindow.h
+    src/ui/CommandIds.h
+    src/ui/MenuCommands.h
     src/ui/RibbonUI.h
     src/ui/Viewport3D.h
     src/ui/SelectionBar.h

@@ -839,38 +839,16 @@ void MainWindow::updateLayout(int cx, int cy) {
 
 // --------------------------------------------------------------------------
 void MainWindow::onCommand(int id) {
+    if (handleFileCommand(id) ||
+        handleWireframeCommand(id) ||
+        handleSurfaceCommand(id) ||
+        handleSolidCommand(id) ||
+        handleCamCommand(id) ||
+        handleSetupWorkflowCommand(id)) {
+        return;
+    }
+
     switch (id) {
-    case IDM_FILE_NEW:    fileNew();     break;
-    case IDM_FILE_OPEN:   fileOpen();    break;
-    case IDM_FILE_SAVE:   fileSave();    break;
-    case IDM_FILE_SAVEAS: fileSave();    break;
-    case IDM_FILE_IMPORT: fileImport();  break;
-    case IDM_FILE_EXIT:   DestroyWindow(m_hwnd); break;
-
-    case IDM_MACHINE_BACKPLOT: runBackplot();   break;
-    case IDM_MACHINE_VERIFY:   runVerify();     break;
-    case IDM_MACHINE_SIM:      runMachineSim(); break;
-    case IDM_MACHINE_POST:     postProcess();   break;
-    case IDM_MACHINE_GEN_POCKET:  generateToolpathPocket();  break;
-    case IDM_MACHINE_GEN_CONTOUR: generateToolpathContour(); break;
-    case IDM_MACHINE_CHAMFER:     generateToolpathChamfer(); break;
-    case IDM_MACHINE_THREAD:      generateToolpathThread();  break;
-    case IDM_MACHINE_PROBE_Z:     probeZSurface();           break;
-    case IDM_MACHINE_PROBE_BORE:  probeBoreCenter();         break;
-    case IDM_MACHINE_PROBE_CORNER:probeCorner();             break;
-    case IDM_MACHINE_3D_WATERLINE:generate3DWaterline();    break;
-    case IDM_MACHINE_3D_SCALLOP:  generate3DScallop();      break;
-    case IDM_MACHINE_3D_RASTER:   generate3DRaster();       break;
-    case IDM_MACHINE_5AXIS:       generate5AxisSwarf();     break;
-    case IDM_MACHINE_REGEN:       regenerateAllToolpaths();  break;
-    case IDM_MACHINE_SUMMARY:     showMachiningSummary();    break;
-    case IDM_SETUP_CONSTRAINTS:   setupConstraints();        break;
-    case IDM_SETUP_POST_PROFILE:  setupPostProfile();        break;
-    case IDM_SETUP_TOOL_DB:       setupToolDatabase();       break;
-    case IDM_SETUP_PERF_MODE:     setupPerformanceMode();    break;
-    case IDM_SETUP_GUIDANCE:      showWorkflowGuidance();    break;
-    case IDM_SETUP_AUDIT_LOG:     showOperationAuditTrail(); break;
-
     case IDM_VIEW_WIREFRAME:
         if (m_viewport) m_viewport->setRenderMode(RenderMode::Wireframe);
         break;
@@ -903,127 +881,6 @@ void MainWindow::onCommand(int id) {
         break;
     case IDM_VIEW_FIT:
         if (m_viewport) { m_viewport->reset(); }
-        break;
-
-    // Wireframe – all tool groups dispatch to createWireframe()
-    case IDM_WF_POINT:
-    case IDM_WF_POINT_DYNAMIC:
-    case IDM_WF_POINT_NODE:
-    case IDM_WF_POINT_SEGMENT:
-    case IDM_WF_LINE:
-    case IDM_WF_LINE_CLOSEST:
-    case IDM_WF_LINE_BISECT:
-    case IDM_WF_LINE_PERP:
-    case IDM_WF_LINE_PARALLEL:
-    case IDM_WF_LINE_NORMAL:
-    case IDM_WF_ARC:
-    case IDM_WF_CIRCLE:
-    case IDM_WF_CIRCLE_EDGE:
-    case IDM_WF_ARC_TANGENT:
-    case IDM_WF_ARC_ENDPOINTS:
-    case IDM_WF_ARC_POLAR:
-    case IDM_WF_SPLINE:
-    case IDM_WF_SPLINE_AUTO:
-    case IDM_WF_SPLINE_BLENDED:
-    case IDM_WF_RECTANGLE:
-    case IDM_WF_RECT_SHAPES:
-    case IDM_WF_POLYGON:
-    case IDM_WF_ELLIPSE:
-    case IDM_WF_HELIX:
-    case IDM_WF_BBOX:
-    case IDM_WF_CURVE_ONE_EDGE:
-    case IDM_WF_CURVE_ALL_EDGES:
-    case IDM_WF_SILHOUETTE:
-    case IDM_WF_CURVE_SLICE_PLN:
-    case IDM_WF_CURVE_SLICE_CRV:
-    case IDM_WF_CURVE_FLOWLINE:
-    case IDM_WF_CURVE_INTERSECT:
-    case IDM_WF_MOD_FILLET:
-    case IDM_WF_MOD_CHAMFER:
-    case IDM_WF_MOD_DYN_TRIM:
-    case IDM_WF_MOD_BREAK_TWO:
-    case IDM_WF_MOD_BREAK_INT:
-    case IDM_WF_MOD_JOIN:
-    case IDM_WF_MOD_INTERSECT:
-    case IDM_WF_MOD_PROJECT:
-    case IDM_WF_MOD_OFFSET:
-    case IDM_WF_MOD_ROLL:
-        createWireframe(id);
-        break;
-
-    case IDM_WF_SET_CPLANE: wfCycleCplane(); break;
-    case IDM_WF_SET_ZDEPTH: wfSetZDepth();  break;
-
-    case IDM_SURF_LOFT:          surfaceLoft();          break;
-    case IDM_SURF_REVOLVE:       surfaceRevolve();       break;
-    case IDM_SURF_FILLET:        surfaceFillet();        break;
-    case IDM_SURF_OFFSET:        surfaceOffset();        break;
-    case IDM_SURF_TRIM:          surfaceTrim();          break;
-    case IDM_SURF_UNTRIM:        surfaceUntrim();        break;
-    case IDM_SURF_EXTEND:        surfaceExtend();        break;
-    case IDM_SURF_FLAT_BOUNDARY: surfaceFlatBoundary();  break;
-    case IDM_SURF_SWEPT:         surfaceSwept();         break;
-    case IDM_SURF_NET:           surfaceNet();           break;
-    case IDM_SURF_FENCE:         surfaceFence();         break;
-    case IDM_SURF_DRAFT_SURF:    surfaceDraft();         break;
-    case IDM_SURF_TRIM_TO_SURF:  surfaceTrimToSurface(); break;
-    case IDM_SURF_FROM_SOLID:    surfaceFromSolid();     break;
-
-    case IDM_SOLID_EXTRUDE:  createSolidBox();        break;
-    case IDM_SOLID_REVOLVE:  createSolidCylinder();   break;
-    case IDM_SOLID_SPHERE:   createSolidSphere();     break;
-    case IDM_SOLID_SWEEP:    createSolidSweep();      break;
-    case IDM_SOLID_LOFT:     createSolidLoft();       break;
-    case IDM_SOLID_THICKEN:  createSolidThicken();    break;
-    case IDM_SOLID_BLOCK:    createSolidBlock();      break;
-    case IDM_SOLID_CYLINDER: createSolidCylinder();   break;
-    case IDM_SOLID_CONE:     createSolidCone();       break;
-    case IDM_SOLID_TORUS:    createSolidTorus();      break;
-    case IDM_SOLID_FILLET:
-    case IDM_SOLID_CHAMFER:
-    case IDM_SOLID_SHELL:
-    case IDM_SOLID_DRAFT:
-    case IDM_SOLID_TRIM:
-        solidModify(id);
-        break;
-    case IDM_SOLID_UNION:
-    case IDM_SOLID_SUBTRACT:
-    case IDM_SOLID_INTERSECT:
-        solidBooleanOp(id);
-        break;
-    case IDM_SOLID_HOLE:      solidHole();           break;
-    case IDM_SOLID_IMPRESS:   solidImpression();     break;
-    case IDM_SOLID_FROM_SURF: solidFromSurfaces();   break;
-
-    // Solids history-tree context-menu commands
-    case IDM_SOLID_TREE_EDIT:
-    case IDM_SOLID_TREE_SUPPRESS:
-    case IDM_SOLID_TREE_DELETE:
-        // Delegate to the notify handler which already knows the selected item
-        if (m_hSolidsTree) {
-            HTREEITEM hSel = TreeView_GetSelection(m_hSolidsTree);
-            if (hSel) {
-                TVITEMW tvi = {};
-                tvi.mask  = TVIF_PARAM;
-                tvi.hItem = hSel;
-                TreeView_GetItem(m_hSolidsTree, &tvi);
-                // lParam encoding: high 16 bits = solidIdx, low 16 bits = featureIdx
-                // featureIdx == 0xFFFF means the item is a solid root, not a feature
-                int solidIdx   = static_cast<int>((tvi.lParam >> 16) & 0xFFFF);
-                int featureIdx = static_cast<int>(tvi.lParam        & 0xFFFF);
-                if (featureIdx != 0xFFFF && m_solidsMgr) {
-                    if (id == IDM_SOLID_TREE_EDIT) {
-                        solidEditFeature(solidIdx, featureIdx);
-                    } else if (id == IDM_SOLID_TREE_SUPPRESS) {
-                        bool suppressed =
-                            m_solidsMgr->getFeature(solidIdx, featureIdx).suppressed;
-                        m_solidsMgr->suppressFeature(solidIdx, featureIdx, !suppressed);
-                    } else { // IDM_SOLID_TREE_DELETE
-                        m_solidsMgr->removeFeature(solidIdx, featureIdx);
-                    }
-                }
-            }
-        }
         break;
 
     case IDM_PREP_HEAL:        prepHeal();         break;

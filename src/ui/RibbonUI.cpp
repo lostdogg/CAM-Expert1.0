@@ -1,5 +1,6 @@
 #include "RibbonUI.h"
-#include "../MainWindow.h"
+#include "CommandIds.h"
+#include "MenuCommands.h"
 #include <commctrl.h>
 #include <cmath>
 
