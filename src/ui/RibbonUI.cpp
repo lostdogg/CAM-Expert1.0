@@ -328,6 +328,50 @@ void RibbonUI::buildToolpathTab() {
     tab.groups.push_back(probe);
     tab.groups.push_back(simulate);
     tab.groups.push_back(toolpathMgr);
+
+    // §3.7 Wire EDM group
+    RibbonGroup edm{"Wire EDM", {
+        {IDM_EDM_CUT_2AXIS,  "2-Axis Cut",  "Wire EDM 2-axis contour cut"},
+        {IDM_EDM_CUT_4AXIS,  "4-Axis Cut",  "Wire EDM 4-axis taper cut"},
+        {IDM_EDM_SKIM,       "Skim Passes", "Add skim/finish EDM passes"},
+        {IDM_EDM_NO_CORE,    "No-Core",     "Wire EDM no-core slug elimination"},
+        {IDM_EDM_RECOGNISE,  "Recognise",   "Auto-recognise EDM features from B-Rep"}
+    }};
+
+    // §3.9 Router group
+    RibbonGroup router{"Router", {
+        {IDM_ROUTER_CONTOUR,   "Contour",   "Router 2D contour path"},
+        {IDM_ROUTER_POCKET,    "Pocket",    "Router 2D pocket path"},
+        {IDM_ROUTER_NEST,      "Nest",      "Nested sheet panel routing"},
+        {IDM_ROUTER_5AXIS,     "5-Axis",    "5-axis surface routing"},
+        {IDM_ROUTER_AGGREGATE, "Aggregate", "Multi-aggregate head routing"}
+    }};
+
+    // §3.10 Art / Relief group
+    RibbonGroup art{"Art / Relief", {
+        {IDM_ART_IMAGE_RELIEF, "Image Relief",   "Convert grayscale image to relief mesh"},
+        {IDM_ART_VECTOR_TEX,   "Vector Texture", "Drape vector chains as embossed texture"},
+        {IDM_ART_ORGANIC,      "Organic Smooth", "Laplacian organic surface smoothing"},
+        {IDM_ART_TOOLPATH,     "Relief Path",    "Generate raster relief toolpath"}
+    }};
+
+    // §4 Enhancement group
+    RibbonGroup enhancements{"Enhancements", {
+        {IDM_DYN_ARC_FIT,     "Arc Fit",         "Improved arc fitting on active toolpath"},
+        {IDM_DYN_TROCH_PEEL,  "Troch Peel",      "Enhanced trochoidal peeling roughing"},
+        {IDM_3D_AUTO_BOUNDARY,"Auto Boundary",   "Auto-select 3D HST machining boundary"},
+        {IDM_3D_MIXED_CUSP,   "Mixed Cusp",      "Mixed cusp height adaptive raster"},
+        {IDM_MA_DEBURR,       "Deburr",          "5-axis deburr pass on active solid"},
+        {IDM_MA_CHAMFER5,     "Chamfer 5X",      "5-axis chamfer on selected edges"},
+        {IDM_TURN_SEMIFINISH, "Semi-Finish",     "Semi-finish turning pass"},
+        {IDM_TURN_CUST_THREAD,"Custom Thread",   "Custom thread profile turning"},
+        {IDM_VERIFY_PROBE_SIM,"Probe Sim",       "Simulate probe path against stock"}
+    }};
+
+    tab.groups.push_back(edm);
+    tab.groups.push_back(router);
+    tab.groups.push_back(art);
+    tab.groups.push_back(enhancements);
     addTab(tab);
 }
 

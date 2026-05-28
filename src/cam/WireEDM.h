@@ -191,7 +191,7 @@ public:
     // manually digitise the profile.
     // -----------------------------------------------------------------------
     static std::vector<EdmStockFeature>
-        recogniseStock(const BRep& model, double zTolerance = 0.01);
+        recogniseStock(const BRep::Solid& model, double zTolerance = 0.01);
 
     // -----------------------------------------------------------------------
     // landProfile()

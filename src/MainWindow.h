@@ -187,6 +187,37 @@ private:
     void showWorkflowGuidance();     // Context-sensitive next-step guidance
     void showOperationAuditTrail();  // Recent operation-level audit entries
 
+    // --- Wire EDM operations (§3.7) ---
+    void edmCut2Axis();              // Wire EDM 2-axis contour cut
+    void edmCut4Axis();              // Wire EDM 4-axis taper cut
+    void edmSkimPasses();            // Add EDM skim/finish passes
+    void edmNoCoreSlug();            // Wire EDM no-core slug elimination
+    void edmRecogniseStock();        // Auto-recognise EDM features from B-Rep
+
+    // --- Router operations (§3.9) ---
+    void routerContour();            // Router 2D contour
+    void routerPocket();             // Router 2D pocket
+    void routerNestSheets();         // Nested sheet panel routing
+    void router5Axis();              // 5-axis surface routing
+    void routerAggregate();          // Multi-aggregate head routing
+
+    // --- Art / Relief operations (§3.10) ---
+    void artImageToRelief();         // Convert grayscale image to relief mesh
+    void artVectorTexture();         // Drape vector chains as embossed texture
+    void artOrganicSmooth();         // Laplacian organic surface smoothing
+    void artReliefToolpath();        // Generate raster relief toolpath
+
+    // --- §4 Enhancement operations ---
+    void dynApplyArcFitting();       // Improved arc fitting on active toolpath
+    void dynTrochoidalPeeling();     // Enhanced trochoidal peeling roughing
+    void hst3DAutoBoundary();        // Auto-select 3D HST machining boundary
+    void hst3DMixedCusp();           // Mixed cusp height adaptive raster
+    void maDeburr5Axis();            // 5-axis deburr pass on active solid
+    void maChamfer5Axis();           // 5-axis chamfer on selected edges
+    void turnSemiFinish();           // Semi-finish turning pass
+    void turnCustomThreadProfile();  // Custom thread profile turning
+    void verifyProbeSim();           // Simulate probe path against stock
+
     // --- Project serialisation (CAMX format) ---
     void loadProjectCamx(const std::wstring& path);
     void saveProjectCamx(const std::wstring& path);

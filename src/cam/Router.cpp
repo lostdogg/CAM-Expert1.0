@@ -366,7 +366,7 @@ Toolpath Router::route5Axis(const NurbsSurface&    surf,
             if (std::abs(p.leadAngle) > 0.001) {
                 double leadRad = p.leadAngle * PI_ROUTER / 180.0;
                 // Feed direction approximation: along U tangent
-                Geom::Vec3 tu = surf.tangentU(u, v);
+                Geom::Vec3 tu = surf.derivU(u, v);
                 double sign = reverse ? -1.0 : 1.0;
                 axis.x += sign * tu.x * std::sin(leadRad);
                 axis.y += sign * tu.y * std::sin(leadRad);

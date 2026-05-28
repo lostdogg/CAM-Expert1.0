@@ -4,6 +4,7 @@
 
 #include "../cam/Toolpath.h"
 #include "../cad/MeshData.h"
+#include "../cad/ZMap.h"
 #include "../managers/ToolpathManager.h"
 #include <vector>
 #include <string>
@@ -23,23 +24,6 @@ struct VerifyResult {
 
     std::vector<Geom::Vec3> gougeLocations;
     std::vector<Geom::Vec3> undercutLocations;
-};
-
-// The stock model – a Z-map (dexel) representation
-struct ZMap {
-    double xMin, xMax, yMin, yMax;
-    int    xRes, yRes;
-    std::vector<double> heights;
-
-    double& at(int xi, int yi) {
-        return heights[static_cast<std::size_t>(yi * xRes + xi)];
-    }
-    double  at(int xi, int yi) const {
-        return heights[static_cast<std::size_t>(yi * xRes + xi)];
-    }
-
-    double cellW() const { return (xMax - xMin) / xRes; }
-    double cellH() const { return (yMax - yMin) / yRes; }
 };
 
 // --------------------------------------------------------------------------
@@ -144,6 +128,73 @@ private:
     Options          m_opts;
     ZMap             m_stockMap;
     ProgressCallback m_progress;
+};
+
+// --------------------------------------------------------------------------
+// §4.6 – ProbeSimulation
+//
+// Validates a probing toolpath against the current stock model (ZMap).
+// Checks that:
+//  1. The probe contact point lies within the expected measurement window
+//     (defined by toleranceMm around the nominal target surface).
+//  2. The probe approach moves do not collide with the stock surface before
+//     the intended touch point.
+//  3. The stylus shank does not gouge the stock during the approach.
+//
+// ProbeSimulation is designed to work with Renishaw Productivity+ cycles
+// or any similar canned probing output.
+// --------------------------------------------------------------------------
+
+struct ProbeContact {
+    Geom::Vec3  nominal;        // expected contact point (from CAD)
+    Geom::Vec3  actual;         // simulated contact point (from stock ZMap)
+    double      deviation;      // signed deviation (actual.z - nominal.z)  mm
+    bool        withinTol;      // |deviation| <= tolerance
+    bool        earlyContact;   // probe touched before intended point
+};
+
+struct ProbeSimResult {
+    std::vector<ProbeContact> contacts;
+    int    contactCount     = 0;
+    int    outOfTolCount    = 0;
+    int    earlyContactCount= 0;
+    double maxDeviation     = 0.0;
+    double minDeviation     = 0.0;
+    bool   hasCollision     = false;
+};
+
+struct ProbeSimOptions {
+    double toleranceMm        = 0.025; // ±mm tolerance around nominal
+    double stylusRadius       = 1.0;   // mm – probe ball radius
+    double shanksRadius       = 2.0;   // mm – probe shank radius (for collision)
+    double approachFeedMmMin  = 300.0; // mm/min – simulated approach feed
+    bool   checkShankCollision = true; // check shank as well as ball
+};
+
+class ProbeSimulation {
+public:
+    explicit ProbeSimulation(ProbeSimOptions opts = {});
+
+    // Simulate a probe toolpath against the given stock ZMap.
+    // Each Linear move in `probePath` is treated as a probing move.
+    // Returns the simulated contact points and deviation report.
+    ProbeSimResult simulate(const Toolpath& probePath,
+                             const ZMap&     stock) const;
+
+    // Quick check: is a single probe contact within tolerance?
+    static bool isWithinTolerance(const ProbeContact& c, double toleranceMm);
+
+private:
+    // Find the Z at which the probe ball first contacts the stock surface
+    // along the move from `from` to `to`.
+    // Returns true and sets `contactZ` if a contact is found within the move.
+    bool findContact(const Geom::Vec3& from,
+                      const Geom::Vec3& to,
+                      double stylusRadius,
+                      const ZMap& stock,
+                      Geom::Vec3& contactPt) const;
+
+    ProbeSimOptions m_opts;
 };
 
 #endif // VERIFY_H

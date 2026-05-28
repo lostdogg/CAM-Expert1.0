@@ -107,6 +107,44 @@ public:
     // This is mandatory for Titanium/Inconel to prevent chatter and tool breakage.
     static void applyGCodeSmoothing(Toolpath& tp, double smoothingRadius = 0.05);
 
+    // -----------------------------------------------------------------------
+    // §4.1 – Improved Arc Fitting (Mastercam 2026 alignment)
+    //
+    // Post-processes a toolpath and replaces sequences of short linear moves
+    // that lie on a common arc with a single circular (G02/G03) move.  This
+    // reduces the number of output blocks, improves surface finish, and lowers
+    // the cycle time by allowing the controller to maintain higher feed rates
+    // through smooth arcs.
+    //
+    //   arcTolerance – max deviation from the fitted arc chord (mm)
+    //   minArcAngle  – minimum arc span (degrees) to bother fitting
+    // -----------------------------------------------------------------------
+    static void applyImprovedArcFitting(Toolpath& tp,
+                                          double arcTolerance = 0.005,
+                                          double minArcAngleDeg = 5.0);
+
+    // -----------------------------------------------------------------------
+    // §4.1 – Enhanced Trochoidal Peeling
+    //
+    // Rebuilds an existing DynamicMill toolpath to use a two-stage
+    // trochoidal strategy optimised for hard materials:
+    //
+    //  Stage 1 – Peel:  A tight inward spiral removes the bulk of material
+    //                   in the pocket core, keeping chip-load constant.
+    //  Stage 2 – Finish trochoidal profile: a final pass around the walls
+    //                   with reduced radial engagement and optimised arc size.
+    //
+    //   peelLayerDepth – axial depth of each peel layer (mm)
+    //   trochRadiusMm  – absolute trochoidal radius override (0 = use params)
+    // -----------------------------------------------------------------------
+    static Toolpath enhancedTrochoidalPeeling(
+                        const std::vector<Geom::Vec2>& boundary,
+                        double depth,
+                        const CuttingTool& tool,
+                        const DynamicParams& p,
+                        double peelLayerDepth  = 2.0,
+                        double trochRadiusMm   = 0.0);
+
     // Generate trochoidal loop moves along a straight core path segment
     static std::vector<ToolpathPoint>
         trochoidalSegment(const Geom::Vec2& from,

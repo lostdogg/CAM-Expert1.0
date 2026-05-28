@@ -399,15 +399,15 @@ void WireEDM::addSkimPasses(WireEDMCutResult&              result,
 
 // --------------------------------------------------------------------------
 std::vector<EdmStockFeature>
-WireEDM::recogniseStock(const BRep& model, double /*zTolerance*/) {
+WireEDM::recogniseStock(const BRep::Solid& model, double /*zTolerance*/) {
     std::vector<EdmStockFeature> features;
 
     // Walk the B-Rep faces; look for faces whose surface normal is close to ±Z.
     // A sequence of such faces that forms a closed loop is a through-feature.
     // (Simplified: we use the face bounding-box and UV mid-point normal check.)
     for (const auto& face : model.faces()) {
-        // Get the UV mid-point normal
-        Geom::Vec3 n = face.normalAt(0.5, 0.5);
+        // Use the face's stored surface normal (outward-pointing Vec3 field)
+        const Geom::Vec3& n = face.normal;
         // Check if the normal is approximately horizontal (nearly ±Z is NOT what we want;
         // we want faces whose normal is nearly horizontal, i.e. the face is a vertical wall)
         const double absNz = std::abs(n.z);
@@ -417,10 +417,22 @@ WireEDM::recogniseStock(const BRep& model, double /*zTolerance*/) {
         }
 
         // Vertical or near-vertical face: candidate wall
-        // Build a simplified 2-D projection of the face loops
+        // Build a simplified 2-D projection from the edge vertices
         EdmStockFeature feat;
-        const auto& verts = face.vertices();
-        for (const auto& v : verts) {
+
+        // Collect unique vertex positions for this face via its edge IDs
+        std::vector<Geom::Vec3> faceVerts;
+        for (int eid : face.edgeIds) {
+            if (eid < 0 || eid >= static_cast<int>(model.edges().size())) continue;
+            const auto& edge = model.edges()[static_cast<std::size_t>(eid)];
+            int vid = edge.startVertexId;
+            if (vid >= 0 && vid < static_cast<int>(model.vertices().size())) {
+                faceVerts.push_back(
+                    model.vertices()[static_cast<std::size_t>(vid)].point);
+            }
+        }
+
+        for (const auto& v : faceVerts) {
             feat.profile.push_back({v.x, v.y});
         }
 
@@ -428,7 +440,7 @@ WireEDM::recogniseStock(const BRep& model, double /*zTolerance*/) {
 
         // Estimate Z extents from vertices
         double zMin =  1e9, zMax = -1e9;
-        for (const auto& v : verts) {
+        for (const auto& v : faceVerts) {
             zMin = std::min(zMin, v.z);
             zMax = std::max(zMax, v.z);
         }

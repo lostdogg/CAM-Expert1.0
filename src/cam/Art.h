@@ -5,10 +5,12 @@
 #include "../cad/MeshData.h"
 #include "../cad/NurbsSurface.h"
 #include "../cad/Geometry.h"
+#include "../cad/ZMap.h"
 #include "Toolpath.h"
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <map>
 
 // --------------------------------------------------------------------------
 // Art – Artistic / Relief Modeling and Machining
@@ -225,14 +227,5 @@ private:
     static bool insideBoundary(const std::vector<Geom::Vec2>& boundary,
                                  double x, double y);
 };
-
-// --------------------------------------------------------------------------
-// ZMap (forward-declared above in Verify.h; re-use its definition here via
-// the shared struct from Verify.h which is included by the .cpp).
-// The Art module uses ZMap for heightmapToZMap() and internal computations.
-// --------------------------------------------------------------------------
-// ZMap is defined in simulation/Verify.h – include that header rather than
-// redefining the struct here.
-#include "../simulation/Verify.h"
 
 #endif // ART_H

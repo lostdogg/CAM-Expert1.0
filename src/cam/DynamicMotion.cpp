@@ -544,3 +544,144 @@ Toolpath DynamicMotion::generateForMaterial(
                                           fsr.toCuttingParams());
     return tp;
 }
+
+// --------------------------------------------------------------------------
+// §4.1 applyImprovedArcFitting
+// --------------------------------------------------------------------------
+void DynamicMotion::applyImprovedArcFitting(Toolpath& tp,
+                                               double arcTolerance,
+                                               double minArcAngleDeg) {
+    auto& pts = const_cast<std::vector<ToolpathPoint>&>(tp.points());
+    if (pts.size() < 3) return;
+
+    const double minArcRad = minArcAngleDeg * 3.14159265358979323846 / 180.0;
+    std::vector<ToolpathPoint> result;
+    result.reserve(pts.size());
+
+    std::size_t i = 0;
+    while (i < pts.size()) {
+        if (pts[i].motion != MotionType::Linear || i + 2 >= pts.size()) {
+            result.push_back(pts[i]);
+            ++i;
+            continue;
+        }
+
+        // Try to fit an arc through pts[i], pts[i+1], pts[i+2]
+        const Geom::Vec3& p0 = pts[i    ].position;
+        const Geom::Vec3& p1 = pts[i + 1].position;
+        const Geom::Vec3& p2 = pts[i + 2].position;
+
+        // Work in XY plane (ignore Z for arc fitting on 2.5D paths)
+        double ax = p0.x, ay = p0.y;
+        double bx = p1.x, by = p1.y;
+        double cx = p2.x, cy = p2.y;
+
+        // Circumcentre of three points
+        double D = 2.0 * (ax*(by - cy) + bx*(cy - ay) + cx*(ay - by));
+        if (std::abs(D) < 1e-9) {
+            // Collinear – keep as linear
+            result.push_back(pts[i]);
+            ++i;
+            continue;
+        }
+        double ux = ((ax*ax + ay*ay)*(by - cy) +
+                     (bx*bx + by*by)*(cy - ay) +
+                     (cx*cx + cy*cy)*(ay - by)) / D;
+        double uy = ((ax*ax + ay*ay)*(cx - bx) +
+                     (bx*bx + by*by)*(ax - cx) +
+                     (cx*cx + cy*cy)*(bx - ax)) / D;
+        double radius = std::sqrt((ax-ux)*(ax-ux) + (ay-uy)*(ay-uy));
+
+        // Check if p1 deviates from arc within tolerance (chord-distance heuristic)
+        double midX = (ax + cx) * 0.5, midY = (ay + cy) * 0.5;
+        double chordDist = std::sqrt((bx-midX)*(bx-midX) + (by-midY)*(by-midY));
+
+        // Sweep angle
+        double a0 = std::atan2(ay - uy, ax - ux);
+        double a2 = std::atan2(cy - uy, cx - ux);
+        double sweep = std::abs(a2 - a0);
+        if (sweep > 3.14159265358979323846) sweep = 2.0*3.14159265358979323846 - sweep;
+
+        if (chordDist < arcTolerance && sweep >= minArcRad) {
+            // Emit arc move replacing pts[i+1]
+            ToolpathPoint arcPt = pts[i + 2];
+            arcPt.motion = MotionType::ArcCW;
+            arcPt.arcCenter = {ux, uy, (p0.z + p2.z) * 0.5};
+            result.push_back(pts[i]);
+            result.push_back(arcPt);
+            i += 3;
+        } else {
+            result.push_back(pts[i]);
+            ++i;
+        }
+    }
+
+    pts = std::move(result);
+}
+
+// --------------------------------------------------------------------------
+// §4.1 enhancedTrochoidalPeeling
+// --------------------------------------------------------------------------
+Toolpath DynamicMotion::enhancedTrochoidalPeeling(
+    const std::vector<Geom::Vec2>& boundary,
+    double depth,
+    const CuttingTool& tool,
+    const DynamicParams& p,
+    double peelLayerDepth,
+    double trochRadiusMm) {
+
+    CuttingParams cuts;
+    cuts.feedRate = 2000.0;
+    cuts.spindleRPM = 8000;
+
+    Toolpath tp(StrategyType::DynamicMill, tool, cuts);
+    tp.setName("Enhanced Trochoidal Peel");
+
+    if (boundary.empty() || peelLayerDepth <= 0.0) return tp;
+
+    const double toolDia = tool.diameter;
+    const double trochR  = (trochRadiusMm > 0.0) ? trochRadiusMm
+                           : (p.trochRadius * toolDia);
+
+    // Find bounding box centroid
+    double cx = 0.0, cy = 0.0;
+    for (const auto& v : boundary) { cx += v.x; cy += v.y; }
+    cx /= boundary.size(); cy /= boundary.size();
+
+    const int numLayers = static_cast<int>(std::ceil(depth / peelLayerDepth));
+
+    for (int layer = 0; layer < numLayers; ++layer) {
+        const double z = -(layer + 1) * peelLayerDepth;
+
+        // Stage 1: inward spiral peel
+        double maxR = 0.0;
+        for (const auto& v : boundary) {
+            double r = std::sqrt((v.x-cx)*(v.x-cx) + (v.y-cy)*(v.y-cy));
+            maxR = std::max(maxR, r);
+        }
+
+        const int spiralSteps = static_cast<int>(maxR / (p.maxEngagement * toolDia)) + 1;
+        for (int s = spiralSteps; s >= 0; --s) {
+            const double r  = maxR * s / static_cast<double>(spiralSteps);
+            const int    nPts = std::max(16, static_cast<int>(2.0 * 3.14159265358979323846 * r / (trochR * 2.0)));
+            for (int j = 0; j <= nPts; ++j) {
+                const double angle = 2.0 * 3.14159265358979323846 * j / nPts;
+                ToolpathPoint pt;
+                pt.position  = {cx + r * std::cos(angle), cy + r * std::sin(angle), z};
+                pt.toolAxis  = {0, 0, 1};
+                pt.motion    = (s == spiralSteps && j == 0) ? MotionType::Rapid : MotionType::Linear;
+                tp.addPoint(pt);
+            }
+        }
+
+        // Stage 2: trochoidal wall finish
+        for (std::size_t bi = 0; bi < boundary.size(); ++bi) {
+            const Geom::Vec2& from = boundary[bi];
+            const Geom::Vec2& to   = boundary[(bi + 1) % boundary.size()];
+            auto segPts = trochoidalSegment(from, to, toolDia, trochR, p.trochPitch, z);
+            for (auto& pt : segPts) tp.addPoint(pt);
+        }
+    }
+
+    return tp;
+}

@@ -85,11 +85,17 @@ enum class StrategyType {
     // 3D
     WaterlineRough, Raster3D, Scallop3D, Spiral3D, ProjectSurface,
     // Multi-Axis
-    Swarf4Axis, Multiaxis5, PortMachining,
+    Swarf4Axis, Multiaxis5, PortMachining, Deburr5Axis,
     // Turning
     RoughTurning, FinishTurning, Grooving, ThreadTurning,
     // Swiss-Style (sliding headstock)
     SwissSliding, SwissPinchSync,
+    // Wire EDM
+    WireEDM2Axis, WireEDM4Axis, WireEDMSkim, WireEDMNoCore,
+    // Router
+    RouterNested, RouterTabbed, Router5Axis, RouterAggregate,
+    // Art / Relief
+    ArtRelief, ArtImageToRelief, ArtVectorTexture,
     // Misc
     Custom
 };

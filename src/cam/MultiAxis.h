@@ -191,6 +191,47 @@ public:
     // -----------------------------------------------------------------------
     static double inverseTimeFeed(double distance, double feedrateMmMin);
 
+    // -----------------------------------------------------------------------
+    // §4.3 – Multiaxis Deburr / Chamfer
+    //
+    // Automatically selects all sharp edges on a B-Rep solid, generates a
+    // 5-axis deburring or chamfering pass along each edge, and links the
+    // passes with collision-aware retract/approach moves.
+    //
+    // deburr()  – removes the burr left by a prior machining pass using a
+    //             small chamfer cutter or deburring spindle.  The tool tilts
+    //             to follow the edge normal so it contacts the arris uniformly.
+    //
+    // chamfer5Axis() – cuts a chamfer of specified width along selected sharp
+    //             edges.  The tool axis is controlled to keep the chamfer cutter
+    //             tip on the edge and to avoid collision with adjacent faces.
+    // -----------------------------------------------------------------------
+
+    struct DeburParams {
+        double edgeAngleDeg     = 150.0; // edges sharper than this are selected (0-180)
+        double approachDist     = 3.0;   // mm – retract/approach length
+        double overlapMm        = 0.5;   // mm – overlap past each end of edge
+        double tileDegOffset    = 5.0;   // extra tilt to keep shank clear
+    };
+
+    struct Chamfer5AxisParams {
+        double chamferWidth     = 0.5;   // mm – target chamfer flat width
+        double chamferAngleDeg  = 45.0;  // degrees – chamfer included angle
+        double edgeAngleDeg     = 120.0; // edges sharper than this are selected
+        double approachDist     = 3.0;   // mm
+        double overlapMm        = 0.5;   // mm
+    };
+
+    static Toolpath deburr(const BRep::Solid&   solid,
+                            const DeburParams&   p,
+                            const CuttingTool&   tool,
+                            const CuttingParams& cuts);
+
+    static Toolpath chamfer5Axis(const BRep::Solid&        solid,
+                                   const Chamfer5AxisParams& p,
+                                   const CuttingTool&        tool,
+                                   const CuttingParams&      cuts);
+
 private:
     MultiAxisParams m_params;
 };

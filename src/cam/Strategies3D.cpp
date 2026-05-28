@@ -346,3 +346,128 @@ Toolpath Strategies3D::spiral(const NurbsSurface& surf,
     tp.markClean();
     return tp;
 }
+
+// --------------------------------------------------------------------------
+// §4.2 autoBoundarySelect
+// --------------------------------------------------------------------------
+std::vector<Geom::Vec2>
+Strategies3D::autoBoundarySelect(const MeshData& mesh,
+                                   double shallowAngleDeg) {
+    const auto& tris = mesh.triangles();
+    if (tris.empty()) return {};
+
+    const double cosThreshold = std::cos(shallowAngleDeg * 3.14159265358979323846 / 180.0);
+
+    double xMin =  1e9, xMax = -1e9;
+    double yMin =  1e9, yMax = -1e9;
+    bool   anyShallow = false;
+
+    for (const auto& tri : tris) {
+        // Triangle struct stores direct Vec3 vertices in v[0..2]
+        const Geom::Vec3& v0 = tri.v[0];
+        const Geom::Vec3& v1 = tri.v[1];
+        const Geom::Vec3& v2 = tri.v[2];
+
+        Geom::Vec3 e1 = {v1.x-v0.x, v1.y-v0.y, v1.z-v0.z};
+        Geom::Vec3 e2 = {v2.x-v0.x, v2.y-v0.y, v2.z-v0.z};
+        Geom::Vec3 n  = {e1.y*e2.z - e1.z*e2.y,
+                         e1.z*e2.x - e1.x*e2.z,
+                         e1.x*e2.y - e1.y*e2.x};
+        double len = std::sqrt(n.x*n.x + n.y*n.y + n.z*n.z);
+        if (len < 1e-12) continue;
+        n.x /= len; n.y /= len; n.z /= len;
+
+        if (std::abs(n.z) >= cosThreshold) {
+            for (const auto& vk : {v0, v1, v2}) {
+                xMin = std::min(xMin, vk.x); xMax = std::max(xMax, vk.x);
+                yMin = std::min(yMin, vk.y); yMax = std::max(yMax, vk.y);
+                anyShallow = true;
+            }
+        }
+    }
+
+    if (!anyShallow || xMin > xMax) return {};
+
+    // Return a rectangular boundary enclosing all shallow-facing vertices
+    return {
+        {xMin, yMin}, {xMax, yMin},
+        {xMax, yMax}, {xMin, yMax},
+        {xMin, yMin}  // closed
+    };
+}
+
+// --------------------------------------------------------------------------
+// §4.2 mixedCuspRaster
+// --------------------------------------------------------------------------
+Toolpath Strategies3D::mixedCuspRaster(const MeshData& mesh,
+                                         double targetCuspMm,
+                                         const CuttingTool& tool,
+                                         const CuttingParams& cuts) {
+    Toolpath tp(StrategyType::Raster3D, tool, cuts);
+    tp.setName("Mixed Cusp Raster");
+
+    const auto& tris = mesh.triangles();
+    if (tris.empty() || targetCuspMm <= 0.0) return tp;
+
+    const double toolRadius = tool.diameter * 0.5;
+    if (toolRadius <= 0.0) return tp;
+
+    // Bounding box from triangle vertices
+    double xMin =  1e9, xMax = -1e9;
+    double yMin =  1e9, yMax = -1e9;
+    for (const auto& tri : tris) {
+        for (const auto& v : tri.v) {
+            xMin = std::min(xMin, v.x); xMax = std::max(xMax, v.x);
+            yMin = std::min(yMin, v.y); yMax = std::max(yMax, v.y);
+        }
+    }
+
+    // Default stepover from target cusp (flat surface approximation)
+    // stepover = 2 * sqrt(2 * R * h) for ball end mill on flat surface
+    const double defaultSO = 2.0 * std::sqrt(2.0 * toolRadius * targetCuspMm);
+
+    bool forward = true;
+    double y = yMin;
+    while (y <= yMax + 1e-9) {
+        // Estimate local slope at this Y row (sample 5 points along X)
+        double maxSlope = 0.0;
+        const int samples = 5;
+        for (int s = 0; s <= samples; ++s) {
+            double x = xMin + (xMax - xMin) * s / samples;
+            double z0 = 0.0, z1 = 0.0;
+            double dy = defaultSO * 0.1;
+            (void)projectOntoMesh(mesh, x, y,      z0);
+            (void)projectOntoMesh(mesh, x, y + dy, z1);
+            double slopeHere = std::abs(z1 - z0) / (dy + 1e-12);
+            maxSlope = std::max(maxSlope, slopeHere);
+        }
+
+        // Adapt stepover: shallower slope → wider step, steeper → tighter
+        double localSO = stepOverFromScallop(toolRadius,
+                            targetCuspMm / std::max(1.0, 1.0 + maxSlope));
+        localSO = std::max(defaultSO * 0.1, std::min(localSO, defaultSO * 2.0));
+
+        double startX = forward ? xMin : xMax;
+        double endX   = forward ? xMax : xMin;
+        double stepX  = forward ? localSO : -localSO;
+
+        for (double x = startX;
+             forward ? (x <= endX + 1e-9) : (x >= endX - 1e-9);
+             x += stepX) {
+            double z = 0.0;
+            (void)projectOntoMesh(mesh, x, y, z);
+
+            ToolpathPoint pt;
+            pt.position = {x, y, z};
+            pt.toolAxis = {0, 0, 1};
+            pt.motion   = tp.points().empty() ? MotionType::Rapid : MotionType::Linear;
+            tp.addPoint(pt);
+        }
+
+        y += localSO;
+        forward = !forward;
+    }
+
+    tp.markClean();
+    return tp;
+}
