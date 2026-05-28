@@ -45,6 +45,7 @@ target_sources(CAMExpertCad PRIVATE
     src/cad/ModelPrep.h
     src/cad/FeatureRecognition.h
     src/cad/WireframeScene.h
+    src/cad/ZMap.h
 )
 
 add_library(CAMExpertCam STATIC)
@@ -66,6 +67,9 @@ target_sources(CAMExpertCam PRIVATE
     src/cam/DynamicPlane.cpp
     src/cam/TransformToolpath.cpp
     src/cam/ProbingCycles.cpp
+    src/cam/WireEDM.cpp
+    src/cam/Router.cpp
+    src/cam/Art.cpp
     src/cam/Toolpath.h
     src/cam/DynamicMotion.h
     src/cam/Strategies2D.h
@@ -82,6 +86,9 @@ target_sources(CAMExpertCam PRIVATE
     src/cam/DynamicPlane.h
     src/cam/TransformToolpath.h
     src/cam/ProbingCycles.h
+    src/cam/WireEDM.h
+    src/cam/Router.h
+    src/cam/Art.h
 )
 target_link_libraries(CAMExpertCam PUBLIC CAMExpertCad)
 

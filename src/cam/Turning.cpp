@@ -227,3 +227,108 @@ Toolpath Turning::subSpindleTransfer(double transferZ,
     tp.markClean();
     return tp;
 }
+
+// --------------------------------------------------------------------------
+// §4.4 semiFinish()
+// --------------------------------------------------------------------------
+Toolpath Turning::semiFinish(const SemiFinishParams& p,
+                               const CuttingTool&      tool,
+                               const CuttingParams&    cuts) {
+    Toolpath tp(StrategyType::FinishTurning, tool, cuts);
+    tp.setName("Semi-Finish Turning");
+
+    const double targetR = p.targetDiameter * 0.5;
+    const double finalR  = targetR - p.semiAllowance;
+
+    for (int pass = 0; pass < p.numPasses; ++pass) {
+        const double r = targetR - pass * (targetR - finalR) / std::max(1, p.numPasses - 1);
+
+        // Rapid to start
+        ToolpathPoint rapid;
+        rapid.position = {0.0, r + 2.0, 0.0};
+        rapid.toolAxis = {0, 0, 1};
+        rapid.motion   = MotionType::Rapid;
+        tp.addPoint(rapid);
+
+        // Feed in Z at semi-finish diameter
+        ToolpathPoint feed;
+        const double partLength = 50.0; // mm – use nominal if not available
+        feed.position = {partLength, r, 0.0};
+        feed.toolAxis = {0, 0, 1};
+        feed.motion   = MotionType::Linear;
+        tp.addPoint(feed);
+
+        // Retract
+        ToolpathPoint retract;
+        retract.position = {partLength + 2.0, r + 2.0, 0.0};
+        retract.toolAxis = {0, 0, 1};
+        retract.motion   = MotionType::Rapid;
+        tp.addPoint(retract);
+    }
+
+    tp.markClean();
+    return tp;
+}
+
+// --------------------------------------------------------------------------
+// §4.4 customThreadProfile()
+// --------------------------------------------------------------------------
+Toolpath Turning::customThreadProfile(const ThreadProfileParams& p,
+                                        const CuttingTool&         tool,
+                                        const CuttingParams&       cuts) {
+    Toolpath tp(StrategyType::ThreadTurning, tool, cuts);
+    tp.setName("Custom Thread Profile");
+
+    const double r = p.majorDiameter * 0.5;
+    const double threadDepth = p.profilePoints.empty() ?
+        0.613 * p.pitch :          // standard 60° V
+        [&]() {
+            double maxR = 0.0;
+            for (const auto& pt : p.profilePoints) maxR = std::max(maxR, pt.y);
+            return maxR;
+        }();
+
+    // Passes: multiple infeed passes, then spring passes
+    const int roughPasses = static_cast<int>(std::ceil(threadDepth / 0.1)) + 1;
+    const int totalPasses = roughPasses + p.springPasses;
+
+    for (int pass = 0; pass < totalPasses; ++pass) {
+        double infeed;
+        if (pass < roughPasses) {
+            infeed = threadDepth * (pass + 1) / roughPasses;
+        } else {
+            infeed = threadDepth; // spring pass at full depth
+        }
+
+        // Apply custom profile offset if given
+        double profileOffset = 0.0;
+        if (!p.profilePoints.empty() && pass < static_cast<int>(p.profilePoints.size())) {
+            profileOffset = p.profilePoints[static_cast<std::size_t>(pass)].y;
+        }
+        const double cutR = r - infeed + profileOffset;
+
+        // Rapid to start
+        ToolpathPoint rapid;
+        rapid.position = {-p.pitch * 2.0, cutR + 1.0, 0.0};
+        rapid.toolAxis = {0, 0, 1};
+        rapid.motion   = MotionType::Rapid;
+        tp.addPoint(rapid);
+
+        // Thread cut (helical approximated as linear in the toolpath)
+        ToolpathPoint cut;
+        cut.position = {p.length + p.pitch, cutR, 0.0};
+        cut.toolAxis = {0, 0, 1};
+        cut.motion   = MotionType::Linear;
+        tp.addPoint(cut);
+
+        // Retract
+        ToolpathPoint retract;
+        retract.position = {p.length + p.pitch * 2.0, cutR + 1.0, 0.0};
+        retract.toolAxis = {0, 0, 1};
+        retract.motion   = MotionType::Rapid;
+        tp.addPoint(retract);
+    }
+
+    tp.markClean();
+    return tp;
+}

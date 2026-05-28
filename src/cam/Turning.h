@@ -48,6 +48,57 @@ struct ThreadParams {
     int    springPasses     = 2;      // finish spring passes
 };
 
+// --------------------------------------------------------------------------
+// §4.4 – SemiFinishParams
+//
+// Controls a semi-finishing pass between rough and finish turning.
+// Leaves a controlled stock allowance for the final finish pass while
+// improving surface quality and stock consistency for the finisher.
+// --------------------------------------------------------------------------
+struct SemiFinishParams {
+    double targetDiameter   = 72.0;   // mm – semi-finish target Ø (between stock and finish)
+    double semiAllowance    = 0.15;   // mm – radial stock to leave for finish pass
+    double feedPerRev       = 0.15;   // mm/rev – lighter than rough, heavier than finish
+    double surfaceSpeed     = 220.0;  // m/min
+    double depthOfCut       = 0.5;    // mm – light radial pass
+    int    numPasses        = 2;      // number of semi-finish passes
+};
+
+// --------------------------------------------------------------------------
+// §4.4 – ThreadProfileParams
+//
+// Allows the programmer to override the standard thread profile with a
+// custom insert geometry.  The profile is defined as a list of (Z, X/2)
+// pairs in insert-local coordinates (origin at insert tip).
+// --------------------------------------------------------------------------
+struct ThreadProfileParams {
+    double majorDiameter  = 20.0;
+    double pitch          = 1.5;
+    double length         = 30.0;
+    int    springPasses   = 2;
+    // Custom profile: list of (axial-offset, radial-offset) from insert tip
+    std::vector<Geom::Vec2> profilePoints;  // empty = use standard 60° V-form
+    double profileAngleDeg = 60.0;          // used when profilePoints is empty
+};
+
+// --------------------------------------------------------------------------
+// §4.4 – CustomInsert
+//
+// Describes a non-standard turning insert.  The geometry is used to
+// compute the true gouge envelope for finish/semi-finish passes.
+// --------------------------------------------------------------------------
+struct CustomInsert {
+    enum class Shape { CNMG, DNMG, TNMG, VNMG, Custom };
+    Shape   shape         = Shape::CNMG;
+    double  inscribedCircle = 12.7;    // mm (IC) – standard designation
+    double  thickness       = 4.76;    // mm
+    double  noseRadius      = 0.8;     // mm
+    double  reliefAngleDeg  = 7.0;     // °
+    double  rakeAngleDeg    = 0.0;     // ° (positive = positive rake)
+    // Custom outline (for Shape::Custom): a list of 2D points around the insert
+    std::vector<Geom::Vec2> customOutline;
+};
+
 class Turning {
 public:
     // Rough turning: remove material in successive radial passes
@@ -75,6 +126,28 @@ public:
     static Toolpath subSpindleTransfer(double transferZ,
                                         double spindleRPM,
                                         const CuttingTool& tool);
+
+    // -----------------------------------------------------------------------
+    // §4.4 – Semi-finish turning
+    //
+    // Generates a light semi-finishing pass between rough and finish turning.
+    // The pass removes the bulk of the rough stock allowance while leaving
+    // a small, consistent stock for the finish pass.
+    // -----------------------------------------------------------------------
+    static Toolpath semiFinish(const SemiFinishParams& p,
+                                const CuttingTool&      tool,
+                                const CuttingParams&    cuts);
+
+    // -----------------------------------------------------------------------
+    // §4.4 – Custom thread profile turning
+    //
+    // Generates a threading pass using either the standard 60° V-form or a
+    // user-defined custom insert profile.  The profile is described as a
+    // list of (Z, X/2) deviations from the nominal thread form.
+    // -----------------------------------------------------------------------
+    static Toolpath customThreadProfile(const ThreadProfileParams& p,
+                                          const CuttingTool&         tool,
+                                          const CuttingParams&       cuts);
 };
 
 #endif // TURNING_H

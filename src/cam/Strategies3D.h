@@ -28,12 +28,20 @@ public:
         double zStep    = 1.0;     // Z increment between passes (mm)
         double stepOver = 0.5;     // fraction of tool Ø between offset passes at same Z
         double stockAllowance = 0.25;
+        // §4.2 – Adaptive Stepdown
+        bool   adaptiveStepdown    = false;  // vary zStep with local surface slope
+        double adaptiveMinStep     = 0.1;    // minimum Z step when slope is shallow (mm)
+        double adaptiveMaxStep     = 3.0;    // maximum Z step when slope is steep (mm)
+        double adaptiveSlopeBreak  = 45.0;   // degrees – transition slope angle
     };
 
     struct RasterParams {
         double stepOver     = 0.5;   // fraction of tool Ø
         double angle        = 0.0;   // raster angle in degrees (0 = X-aligned)
         double stockAllowance = 0.0;
+        // §4.2 – Mixed cusp height: adjust stepover per zone to keep scallop uniform
+        bool   mixedCuspControl = false;
+        double targetCuspHeight = 0.005; // mm – desired scallop height for all zones
     };
 
     struct ScallopParams {
@@ -47,6 +55,35 @@ public:
         double pitchPerRev  = 0.5;    // step-over per revolution (mm)
         double stockAllowance = 0.0;
     };
+
+    // -----------------------------------------------------------------------
+    // §4.2 – Auto Boundary Selection
+    //
+    // Analyses a mesh to automatically derive a machining boundary that
+    // excludes steep walls (handled by waterline) and concentrates the 3D
+    // HST passes on shallow-to-moderate curvature regions.
+    //
+    //   shallowAngleDeg – faces shallower than this angle (from horizontal)
+    //                     are included in the auto-boundary (default 75°).
+    //
+    // Returns a closed 2-D polygon in XY that encloses all shallow faces.
+    // -----------------------------------------------------------------------
+    static std::vector<Geom::Vec2>
+        autoBoundarySelect(const MeshData& mesh,
+                            double shallowAngleDeg = 75.0);
+
+    // -----------------------------------------------------------------------
+    // §4.2 – Mixed Cusp Height Raster
+    //
+    // Generates a raster toolpath where the lateral stepover is locally
+    // adapted so that the scallop height is as close to targetCuspMm as
+    // possible across the entire surface.  Steep zones get tighter stepovers;
+    // flat zones can use wider stepovers.
+    // -----------------------------------------------------------------------
+    static Toolpath mixedCuspRaster(const MeshData& mesh,
+                                     double targetCuspMm,
+                                     const CuttingTool& tool,
+                                     const CuttingParams& cuts);
 
     // Generate waterline (Z-level) toolpath on a NURBS surface
     static Toolpath waterline(const NurbsSurface& surf,

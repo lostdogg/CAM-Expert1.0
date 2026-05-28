@@ -2,6 +2,7 @@
 #include "../cad/Geometry.h"
 #include <cmath>
 #include <algorithm>
+#include <map>
 
 static constexpr double PIMA = 3.14159265358979323846; // π (pi) – avoids M_PI portability concerns
 
@@ -444,6 +445,198 @@ Toolpath MultiAxis::normalToSurface(const NurbsSurface& surf,
             ret.motion = MotionType::Retract;
             tp.addPoint(ret);
         }
+    }
+
+    tp.markClean();
+    return tp;
+}
+
+// --------------------------------------------------------------------------
+// §4.3 helpers
+// --------------------------------------------------------------------------
+namespace {
+
+// Returns the cosine of the dihedral angle between two BRep faces sharing an edge.
+// Uses the stored face normals (planar approximation).
+double dihedralCos(const BRep::Face& f0, const BRep::Face& f1) {
+    const Geom::Vec3& n0 = f0.normal;
+    const Geom::Vec3& n1 = f1.normal;
+    return n0.x*n1.x + n0.y*n1.y + n0.z*n1.z;
+}
+
+// Collect sharp edges (dihedral angle < threshold) from a B-Rep solid.
+// Returns a list of (v0, v1) vertex-position pairs.
+std::vector<std::pair<Geom::Vec3, Geom::Vec3>>
+selectSharpEdges(const BRep::Solid& solid, double sharpAngleDeg) {
+    const double cosThresh = std::cos(sharpAngleDeg * 3.14159265358979323846 / 180.0);
+    std::vector<std::pair<Geom::Vec3, Geom::Vec3>> result;
+
+    // Build edge → face map
+    std::map<int, std::vector<int>> edgeFaces;
+    const auto& faces = solid.faces();
+    for (int fi = 0; fi < static_cast<int>(faces.size()); ++fi) {
+        for (int eid : faces[static_cast<std::size_t>(fi)].edgeIds) {
+            edgeFaces[eid].push_back(fi);
+        }
+    }
+
+    const auto& edges    = solid.edges();
+    const auto& vertices = solid.vertices();
+
+    for (int ei = 0; ei < static_cast<int>(edges.size()); ++ei) {
+        const auto it = edgeFaces.find(ei);
+        if (it == edgeFaces.end() || it->second.size() < 2) continue;
+
+        const BRep::Face& fa = faces[static_cast<std::size_t>(it->second[0])];
+        const BRep::Face& fb = faces[static_cast<std::size_t>(it->second[1])];
+        double dc = dihedralCos(fa, fb);
+        // cos(180°) = -1 (flat), cos(90°) = 0 (sharp right angle)
+        // We want edges where angle < sharpAngleDeg → cos > cosThresh
+        if (dc > cosThresh) continue; // angle is NOT sharp enough
+
+        const auto& e = edges[static_cast<std::size_t>(ei)];
+        int v0 = e.startVertexId, v1 = e.endVertexId;
+        if (v0 < 0 || v1 < 0 ||
+            v0 >= static_cast<int>(vertices.size()) ||
+            v1 >= static_cast<int>(vertices.size())) continue;
+
+        result.push_back({vertices[static_cast<std::size_t>(v0)].point,
+                          vertices[static_cast<std::size_t>(v1)].point});
+    }
+    return result;
+}
+
+// Build a deburr/chamfer pass along a single edge segment.
+// The tool tilts `tiltDeg` off the edge mid-normal.
+std::vector<ToolpathPoint>
+buildEdgePass(const Geom::Vec3& pStart, const Geom::Vec3& pEnd,
+              const Geom::Vec3& edgeNormal,
+              double approachDist, double overlapMm, double tiltDeg) {
+    std::vector<ToolpathPoint> pts;
+
+    // Edge direction
+    Geom::Vec3 dir = {pEnd.x-pStart.x, pEnd.y-pStart.y, pEnd.z-pStart.z};
+    double len = std::sqrt(dir.x*dir.x + dir.y*dir.y + dir.z*dir.z);
+    if (len < 1e-9) return pts;
+    dir.x /= len; dir.y /= len; dir.z /= len;
+
+    // Tool axis: rotate edgeNormal by tiltDeg about edge direction
+    // Simplified: just use edge normal + slight tilt offset
+    double cosTilt = std::cos(tiltDeg * 3.14159265358979323846 / 180.0);
+    double sinTilt = std::sin(tiltDeg * 3.14159265358979323846 / 180.0);
+    Geom::Vec3 axis = {
+        cosTilt * edgeNormal.x + sinTilt * dir.x,
+        cosTilt * edgeNormal.y + sinTilt * dir.y,
+        cosTilt * edgeNormal.z + sinTilt * dir.z
+    };
+    double aLen = std::sqrt(axis.x*axis.x + axis.y*axis.y + axis.z*axis.z);
+    if (aLen > 1e-9) { axis.x /= aLen; axis.y /= aLen; axis.z /= aLen; }
+
+    // Approach
+    ToolpathPoint approach;
+    approach.position = {
+        pStart.x - dir.x * approachDist,
+        pStart.y - dir.y * approachDist,
+        pStart.z - dir.z * approachDist
+    };
+    approach.toolAxis = axis;
+    approach.motion   = MotionType::Rapid;
+    pts.push_back(approach);
+
+    // Cut start
+    ToolpathPoint cut0;
+    cut0.position = pStart;
+    cut0.toolAxis = axis;
+    cut0.motion   = MotionType::Linear;
+    pts.push_back(cut0);
+
+    // Cut end + overlap
+    ToolpathPoint cut1;
+    cut1.position = {
+        pEnd.x + dir.x * overlapMm,
+        pEnd.y + dir.y * overlapMm,
+        pEnd.z + dir.z * overlapMm
+    };
+    cut1.toolAxis = axis;
+    cut1.motion   = MotionType::Linear;
+    pts.push_back(cut1);
+
+    // Retract
+    ToolpathPoint retract;
+    retract.position = {
+        cut1.position.x - dir.x * approachDist,
+        cut1.position.y - dir.y * approachDist,
+        cut1.position.z + approachDist  // lift Z on retract
+    };
+    retract.toolAxis = axis;
+    retract.motion   = MotionType::Rapid;
+    pts.push_back(retract);
+
+    return pts;
+}
+
+} // anonymous namespace
+
+// --------------------------------------------------------------------------
+// §4.3 deburr()
+// --------------------------------------------------------------------------
+Toolpath MultiAxis::deburr(const BRep::Solid&   solid,
+                             const DeburParams&   p,
+                             const CuttingTool&   tool,
+                             const CuttingParams& cuts) {
+    Toolpath tp(StrategyType::Deburr5Axis, tool, cuts);
+    tp.setName("5-Axis Deburr");
+
+    auto sharpEdges = selectSharpEdges(solid, p.edgeAngleDeg);
+
+    for (const auto& [v0, v1] : sharpEdges) {
+        // Approximate edge normal: point away from the part centre (origin)
+        Geom::Vec3 mid  = {(v0.x+v1.x)*0.5, (v0.y+v1.y)*0.5, (v0.z+v1.z)*0.5};
+        double midLen = std::sqrt(mid.x*mid.x + mid.y*mid.y + mid.z*mid.z);
+        Geom::Vec3 eNorm = (midLen > 1e-9) ?
+            Geom::Vec3{mid.x/midLen, mid.y/midLen, mid.z/midLen} :
+            Geom::Vec3{0, 0, 1};
+
+        auto edgePts = buildEdgePass(v0, v1, eNorm,
+                                      p.approachDist, p.overlapMm,
+                                      p.tileDegOffset);
+        for (auto& pt : edgePts) tp.addPoint(pt);
+    }
+
+    tp.markClean();
+    return tp;
+}
+
+// --------------------------------------------------------------------------
+// §4.3 chamfer5Axis()
+// --------------------------------------------------------------------------
+Toolpath MultiAxis::chamfer5Axis(const BRep::Solid&        solid,
+                                   const Chamfer5AxisParams& p,
+                                   const CuttingTool&        tool,
+                                   const CuttingParams&      cuts) {
+    Toolpath tp(StrategyType::Deburr5Axis, tool, cuts);
+    tp.setName("5-Axis Chamfer");
+
+    auto sharpEdges = selectSharpEdges(solid, p.edgeAngleDeg);
+
+    // Chamfer offset: move tool tip outward by half chamfer width
+    const double halfW = p.chamferWidth * 0.5;
+    const double tiltDeg = 90.0 - p.chamferAngleDeg * 0.5;
+
+    for (const auto& [v0, v1] : sharpEdges) {
+        Geom::Vec3 mid  = {(v0.x+v1.x)*0.5, (v0.y+v1.y)*0.5, (v0.z+v1.z)*0.5};
+        double midLen = std::sqrt(mid.x*mid.x + mid.y*mid.y + mid.z*mid.z);
+        Geom::Vec3 eNorm = (midLen > 1e-9) ?
+            Geom::Vec3{mid.x/midLen, mid.y/midLen, mid.z/midLen} :
+            Geom::Vec3{0, 0, 1};
+
+        // Offset start/end by halfW along edge normal
+        Geom::Vec3 c0 = {v0.x + eNorm.x*halfW, v0.y + eNorm.y*halfW, v0.z + eNorm.z*halfW};
+        Geom::Vec3 c1 = {v1.x + eNorm.x*halfW, v1.y + eNorm.y*halfW, v1.z + eNorm.z*halfW};
+
+        auto edgePts = buildEdgePass(c0, c1, eNorm,
+                                      p.approachDist, p.overlapMm, tiltDeg);
+        for (auto& pt : edgePts) tp.addPoint(pt);
     }
 
     tp.markClean();

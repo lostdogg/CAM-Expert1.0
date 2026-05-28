@@ -359,3 +359,107 @@ double StockCompare::deviationAt(const StockCompareResult& result,
     if (idx >= result.cells.size()) return 0.0;
     return result.cells[idx].deviation;
 }
+
+// ==========================================================================
+// §4.6 ProbeSimulation
+// ==========================================================================
+
+ProbeSimulation::ProbeSimulation(ProbeSimOptions opts)
+    : m_opts(std::move(opts)) {}
+
+bool ProbeSimulation::isWithinTolerance(const ProbeContact& c, double toleranceMm) {
+    return std::abs(c.deviation) <= toleranceMm;
+}
+
+bool ProbeSimulation::findContact(const Geom::Vec3& from,
+                                    const Geom::Vec3& to,
+                                    double stylusRadius,
+                                    const ZMap& stock,
+                                    Geom::Vec3& contactPt) const {
+    // Walk the move in small steps and check probe ball against stock Z
+    Geom::Vec3 dir = {to.x - from.x, to.y - from.y, to.z - from.z};
+    double len = std::sqrt(dir.x*dir.x + dir.y*dir.y + dir.z*dir.z);
+    if (len < 1e-9) return false;
+    dir.x /= len; dir.y /= len; dir.z /= len;
+
+    const double stepMm = std::min(0.1, len / 100.0);
+    const int steps = static_cast<int>(std::ceil(len / stepMm));
+
+    const double xRange = stock.xMax - stock.xMin;
+    const double yRange = stock.yMax - stock.yMin;
+    if (xRange <= 0.0 || yRange <= 0.0) return false;
+
+    for (int i = 0; i <= steps; ++i) {
+        double t  = i * stepMm;
+        Geom::Vec3 p = {from.x + dir.x * t,
+                         from.y + dir.y * t,
+                         from.z + dir.z * t};
+
+        // Map (x,y) to zmap grid
+        double fx = (p.x - stock.xMin) / xRange * (stock.xRes - 1);
+        double fy = (p.y - stock.yMin) / yRange * (stock.yRes - 1);
+        int xi = static_cast<int>(std::clamp(fx, 0.0, double(stock.xRes - 1)));
+        int yi = static_cast<int>(std::clamp(fy, 0.0, double(stock.yRes - 1)));
+
+        double stockZ = stock.at(xi, yi);
+
+        // Probe tip is at (p.z - stylusRadius); contact when tip Z <= stockZ
+        if ((p.z - stylusRadius) <= stockZ + 1e-6) {
+            contactPt = {p.x, p.y, stockZ + stylusRadius};
+            return true;
+        }
+    }
+    return false;
+}
+
+ProbeSimResult
+ProbeSimulation::simulate(const Toolpath& probePath, const ZMap& stock) const {
+    ProbeSimResult result;
+
+    const auto& pts = probePath.points();
+    if (pts.empty()) return result;
+
+    for (std::size_t i = 0; i + 1 < pts.size(); ++i) {
+        const auto& from = pts[i];
+        const auto& to   = pts[i + 1];
+
+        if (to.motion != MotionType::Linear) continue;
+
+        Geom::Vec3 contactPt;
+        bool hit = findContact(from.position, to.position,
+                                m_opts.stylusRadius, stock, contactPt);
+        if (!hit) continue;
+
+        ProbeContact c;
+        c.actual    = contactPt;
+        c.nominal   = to.position; // treat move endpoint as nominal
+        c.deviation = contactPt.z - to.position.z;
+        c.withinTol = std::abs(c.deviation) <= m_opts.toleranceMm;
+
+        // Early contact: hit before the last step of the move
+        double moveLen2 = 0.0;
+        {
+            double dx = to.position.x - from.position.x;
+            double dy = to.position.y - from.position.y;
+            double dz = to.position.z - from.position.z;
+            moveLen2 = dx*dx + dy*dy + dz*dz;
+        }
+        double hitDist2 = 0.0;
+        {
+            double dx = contactPt.x - from.position.x;
+            double dy = contactPt.y - from.position.y;
+            double dz = contactPt.z - from.position.z;
+            hitDist2 = dx*dx + dy*dy + dz*dz;
+        }
+        c.earlyContact = (hitDist2 < moveLen2 * 0.95);
+
+        result.contacts.push_back(c);
+        ++result.contactCount;
+        if (!c.withinTol)    ++result.outOfTolCount;
+        if (c.earlyContact)  ++result.earlyContactCount;
+        if (c.deviation > result.maxDeviation) result.maxDeviation = c.deviation;
+        if (c.deviation < result.minDeviation) result.minDeviation = c.deviation;
+    }
+
+    return result;
+}

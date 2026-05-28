@@ -31,6 +31,45 @@ constexpr int IDM_SETUP_PERF_MODE     = 2024; // Setup performance mode
 constexpr int IDM_SETUP_GUIDANCE      = 2025; // Show context workflow guidance
 constexpr int IDM_SETUP_AUDIT_LOG     = 2026; // Show operation audit trail
 
+// --------------------------------------------------------------------------
+// Wire EDM commands (2030–2039)
+// --------------------------------------------------------------------------
+constexpr int IDM_EDM_CUT_2AXIS     = 2030; // Wire EDM 2-axis contour cut
+constexpr int IDM_EDM_CUT_4AXIS     = 2031; // Wire EDM 4-axis taper cut
+constexpr int IDM_EDM_SKIM          = 2032; // Wire EDM skim/finish passes
+constexpr int IDM_EDM_NO_CORE       = 2033; // Wire EDM no-core (slug elimination)
+constexpr int IDM_EDM_RECOGNISE     = 2034; // Auto-recognise EDM stock features
+
+// --------------------------------------------------------------------------
+// Router commands (2040–2049)
+// --------------------------------------------------------------------------
+constexpr int IDM_ROUTER_CONTOUR    = 2040; // Router 2D contour
+constexpr int IDM_ROUTER_POCKET     = 2041; // Router 2D pocket
+constexpr int IDM_ROUTER_NEST       = 2042; // Nested sheet routing
+constexpr int IDM_ROUTER_5AXIS      = 2043; // 5-axis surface routing
+constexpr int IDM_ROUTER_AGGREGATE  = 2044; // Multi-aggregate head routing
+
+// --------------------------------------------------------------------------
+// Art / Relief commands (2050–2059)
+// --------------------------------------------------------------------------
+constexpr int IDM_ART_IMAGE_RELIEF  = 2050; // Image-to-relief mesh
+constexpr int IDM_ART_VECTOR_TEX    = 2051; // Vector-to-texture emboss
+constexpr int IDM_ART_ORGANIC       = 2052; // Organic surface smoothing
+constexpr int IDM_ART_TOOLPATH      = 2053; // Relief toolpath generation
+
+// --------------------------------------------------------------------------
+// §4 Enhancement commands (2060–2079)
+// --------------------------------------------------------------------------
+constexpr int IDM_DYN_ARC_FIT       = 2060; // Apply improved arc fitting to selected toolpath
+constexpr int IDM_DYN_TROCH_PEEL    = 2061; // Enhanced trochoidal peeling roughing
+constexpr int IDM_3D_AUTO_BOUNDARY  = 2062; // Auto-select 3D HST machining boundary
+constexpr int IDM_3D_MIXED_CUSP     = 2063; // Mixed cusp height raster
+constexpr int IDM_MA_DEBURR         = 2064; // 5-axis deburr pass
+constexpr int IDM_MA_CHAMFER5       = 2065; // 5-axis chamfer pass
+constexpr int IDM_TURN_SEMIFINISH   = 2066; // Semi-finish turning pass
+constexpr int IDM_TURN_CUST_THREAD  = 2067; // Custom thread profile turning
+constexpr int IDM_VERIFY_PROBE_SIM  = 2068; // Probe path simulation
+
 constexpr int IDM_VIEW_WIREFRAME       = 3001;
 constexpr int IDM_VIEW_SHADED          = 3002;
 constexpr int IDM_VIEW_TRANSLU         = 3003;
